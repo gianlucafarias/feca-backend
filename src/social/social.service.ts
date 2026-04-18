@@ -55,12 +55,26 @@ export class SocialService {
     const viewerTasteIds =
       (await this.socialRepository.getUserTastePreferenceIds(userId))
         ?.tastePreferenceIds ?? [];
+
+    let cityIdOverride: string | undefined;
+    if (query.mode === "city" && query.cityGooglePlaceId) {
+      try {
+        const city = await this.placesService.getOrCreateCityRecordByGooglePlaceId(
+          query.cityGooglePlaceId,
+        );
+        cityIdOverride = city.id;
+      } catch {
+        cityIdOverride = undefined;
+      }
+    }
+
     const { visits, total } = await this.socialRepository.listFeed(userId, {
       lat: query.lat,
       limit: query.limit,
       lng: query.lng,
       mode: query.mode,
       offset,
+      cityIdOverride,
     });
 
     const items = visits.map((visit) => {

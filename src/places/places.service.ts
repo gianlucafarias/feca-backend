@@ -201,6 +201,11 @@ export class PlacesService {
     }));
   }
 
+  /** Ciudad canónica persistida; usado p. ej. por el feed `mode=city` con ciudad seleccionada en el cliente. */
+  async getOrCreateCityRecordByGooglePlaceId(cityGooglePlaceId: string) {
+    return this.ensureStoredCityByGooglePlaceId(cityGooglePlaceId);
+  }
+
   async resolve(input: ResolvePlaceDto) {
     const existing = await this.placesRepository.getPlaceBySource(
       input.source,

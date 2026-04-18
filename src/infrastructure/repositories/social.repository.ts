@@ -25,6 +25,8 @@ type FeedInput = PaginationInput & {
   mode: FeedMode;
   lat?: number;
   lng?: number;
+  /** Con mode=city: filtrar por este cityId en lugar del perfil del viewer */
+  cityIdOverride?: string;
 };
 
 type UserStats = {
@@ -1302,15 +1304,18 @@ export class SocialRepository {
     };
   }
 
-  private async listCityFeed(userId: string, input: PaginationInput) {
-    const viewer = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        cityId: true,
-      },
-    });
+  private async listCityFeed(userId: string, input: FeedInput) {
+    const targetCityId =
+      typeof input.cityIdOverride === "string" && input.cityIdOverride.length > 0
+        ? input.cityIdOverride
+        : (
+            await this.prisma.user.findUnique({
+              where: { id: userId },
+              select: { cityId: true },
+            })
+          )?.cityId;
 
-    if (!viewer?.cityId) {
+    if (!targetCityId) {
       return {
         total: 0,
         visits: [],
@@ -1322,7 +1327,7 @@ export class SocialRepository {
         not: userId,
       },
       place: {
-        cityId: viewer.cityId,
+        cityId: targetCityId,
       },
       user: {
         settings: {
