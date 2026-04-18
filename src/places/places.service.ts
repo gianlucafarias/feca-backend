@@ -334,6 +334,19 @@ export class PlacesService {
       lng: coords.lng,
     };
 
+    if (process.env.FECA_DEBUG_CITY === "1") {
+      this.logger.log(
+        JSON.stringify({
+          tag: "places.nearby",
+          userId,
+          queryLat: input.lat ?? null,
+          queryLng: input.lng ?? null,
+          resolvedLat: resolved.lat,
+          resolvedLng: resolved.lng,
+        }),
+      );
+    }
+
     const cacheKey = this.buildNearbyCacheKey(resolved);
     const query = resolved.query?.trim();
     const candidateLimit = query ? resolved.limit : Math.min(resolved.limit * 3, 30);

@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import { GuideVisibility } from "@prisma/client";
@@ -43,6 +44,8 @@ import { TASTE_OPTIONS, TASTE_OPTION_IDS } from "./taste-options";
 
 @Injectable()
 export class SocialService {
+  private readonly logger = new Logger(SocialService.name);
+
   constructor(
     private readonly socialRepository: SocialRepository,
     private readonly placesRepository: PlacesRepository,
@@ -95,6 +98,22 @@ export class SocialService {
       offset,
       cityIdOverride,
     });
+
+    if (process.env.FECA_DEBUG_CITY === "1") {
+      this.logger.log(
+        JSON.stringify({
+          tag: "feed",
+          userId,
+          mode: query.mode,
+          cityGooglePlaceId: query.cityGooglePlaceId ?? null,
+          lat: query.lat ?? null,
+          lng: query.lng ?? null,
+          cityIdOverride: cityIdOverride ?? null,
+          total,
+          items: visits.length,
+        }),
+      );
+    }
 
     const items = visits.map((visit) => {
       const appearanceReason = buildFeedAppearanceReason(
