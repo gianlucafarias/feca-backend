@@ -1,0 +1,381 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AuthProvider {
+  google
+}
+
+enum DisplayTone {
+  calido
+  editorial
+  minimal
+}
+
+enum ContentVisibility {
+  public
+  followers
+  private
+}
+
+enum GroupInvitePolicy {
+  anyone
+  following_only
+  mutuals_only
+}
+
+enum GroupEventStatus {
+  proposed
+  confirmed
+  completed
+}
+
+enum GroupMemberRole {
+  owner
+  admin
+  member
+}
+
+enum GroupMemberStatus {
+  pending
+  accepted
+  declined
+  left
+}
+
+enum PlaceSource {
+  google
+  manual
+}
+
+enum VisitWouldReturn {
+  yes
+  maybe
+  no
+}
+
+enum GuideVisibility {
+  private
+  unlisted
+  public
+}
+
+enum GroupEventRsvpStatus {
+  going
+  maybe
+  declined
+}
+
+enum NotificationType {
+  follow
+  group_invite
+  group_joined
+  group_event_proposed
+  group_event_rsvp
+  visit_created
+  diary_published
+}
+
+enum NotificationEntityType {
+  user
+  group
+  group_event
+  visit
+  diary
+}
+
+model City {
+  id            String   @id @default(cuid())
+  googlePlaceId String   @unique
+  name          String
+  displayName   String
+  lat           Float?
+  lng           Float?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  users         User[]   @relation("UserCity")
+  places        Place[]  @relation("PlaceCity")
+
+  @@index([name])
+}
+
+model User {
+  id                 String           @id @default(cuid())
+  email              String           @unique
+  emailVerified      Boolean          @default(false)
+  username           String           @unique
+  displayName        String
+  avatarUrl          String?
+  bio                String?
+  city               String?
+  cityId             String?
+  lat                Float?
+  lng                Float?
+  tone               DisplayTone      @default(editorial)
+  tastePreferenceIds String[]         @default([])
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  cityRef            City?            @relation("UserCity", fields: [cityId], references: [id], onDelete: SetNull)
+  identities         AuthIdentity[]
+  sessions           Session[]
+  visits             Visit[]
+  savedPlaces        PlaceSave[]
+  settings           UserSettings?
+  following          UserFollow[]     @relation("UserFollowing")
+  followers          UserFollow[]     @relation("UserFollowers")
+  groupsCreated      Group[]          @relation("GroupCreator")
+  groupMembers       GroupMember[]
+  groupInvitesSent   GroupMember[]    @relation("GroupInviteSender")
+  eventsProposed     GroupEvent[]     @relation("GroupEventProposer")
+  eventRsvps         GroupEventRsvp[]
+  diaries            Diary[]          @relation("DiaryCreator")
+  notifications      Notification[]   @relation("UserNotifications")
+  notificationsSent  Notification[]   @relation("NotificationActor")
+
+  @@index([cityId])
+}
+
+model AuthIdentity {
+  id             String       @id @default(cuid())
+  userId         String
+  provider       AuthProvider
+  providerUserId String
+  email          String
+  emailVerified  Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUserId])
+  @@index([userId])
+}
+
+model Session {
+  id               String    @id @default(cuid())
+  userId           String
+  refreshTokenHash String    @unique
+  userAgent        String?
+  ipAddress        String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([expiresAt])
+}
+
+model UserSettings {
+  id                 String            @id @default(cuid())
+  userId             String            @unique
+  activityVisibility ContentVisibility @default(public)
+  diaryVisibility    ContentVisibility @default(public)
+  groupInvitePolicy  GroupInvitePolicy @default(anyone)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserFollow {
+  id         String   @id @default(cuid())
+  followerId String
+  followedId String
+  createdAt  DateTime @default(now())
+  follower   User     @relation("UserFollowing", fields: [followerId], references: [id], onDelete: Cascade)
+  followed   User     @relation("UserFollowers", fields: [followedId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followedId])
+  @@index([followerId, createdAt(sort: Desc)])
+  @@index([followedId, createdAt(sort: Desc)])
+}
+
+model Place {
+  id                  String       @id @default(cuid())
+  source              PlaceSource
+  sourcePlaceId       String?      @unique
+  name                String
+  address             String
+  city                String
+  cityId              String?
+  lat                 Float?
+  lng                 Float?
+  categories          String[]
+  ratingExternal      Float?
+  ratingCountExternal Int?
+  phone               String?
+  website             String?
+  openingHours        String[]
+  googleMapsUri       String?
+  coverPhotoRef       String?
+  coverPhotoUrl       String?
+  lastSyncedAt        DateTime?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  cityRef             City?        @relation("PlaceCity", fields: [cityId], references: [id], onDelete: SetNull)
+  visits              Visit[]
+  saves               PlaceSave[]
+  diaryPlaces         DiaryPlace[]
+  groupEvents         GroupEvent[]
+
+  @@index([city])
+  @@index([cityId])
+  @@index([name])
+}
+
+model Visit {
+  id           String            @id @default(cuid())
+  placeId      String
+  userId       String
+  rating       Int
+  note         String
+  tags         String[]
+  orderedItems String?
+  wouldReturn  VisitWouldReturn?
+  noiseLevel   Int?
+  wifiQuality  Int?
+  waitLevel    Int?
+  priceTier    Int?
+  photoUrls    String[]          @default([])
+  visitedAt    DateTime
+  createdAt    DateTime          @default(now())
+  place        Place             @relation(fields: [placeId], references: [id], onDelete: Cascade)
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([placeId, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+model PlaceSave {
+  id        String   @id @default(cuid())
+  userId    String
+  placeId   String
+  reason    String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  place     Place    @relation(fields: [placeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, placeId])
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+model Group {
+  id          String        @id @default(cuid())
+  name        String
+  createdById String
+  inviteCode  String        @unique
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  createdBy   User          @relation("GroupCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  members     GroupMember[]
+  events      GroupEvent[]
+
+  @@index([createdById, createdAt(sort: Desc)])
+}
+
+model GroupMember {
+  id          String            @id @default(cuid())
+  groupId     String
+  userId      String
+  invitedById String?
+  role        GroupMemberRole   @default(member)
+  status      GroupMemberStatus @default(pending)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  group       Group             @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invitedBy   User?             @relation("GroupInviteSender", fields: [invitedById], references: [id], onDelete: SetNull)
+
+  @@unique([groupId, userId])
+  @@index([groupId, status, createdAt(sort: Desc)])
+  @@index([userId, status, createdAt(sort: Desc)])
+}
+
+model GroupEvent {
+  id           String           @id @default(cuid())
+  groupId      String
+  placeId      String
+  proposedById String
+  date         DateTime
+  status       GroupEventStatus @default(proposed)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  group        Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  place        Place            @relation(fields: [placeId], references: [id], onDelete: Cascade)
+  proposedBy   User             @relation("GroupEventProposer", fields: [proposedById], references: [id], onDelete: Cascade)
+  rsvps        GroupEventRsvp[]
+
+  @@index([groupId, createdAt(sort: Desc)])
+}
+
+model GroupEventRsvp {
+  id        String               @id @default(cuid())
+  eventId   String
+  userId    String
+  rsvp      GroupEventRsvpStatus
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  event     GroupEvent           @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+model Diary {
+  id              String          @id @default(cuid())
+  name            String
+  description     String?
+  createdById     String
+  intro           String?
+  editorialReason String?
+  coverImageUrl   String?
+  visibility      GuideVisibility @default(private)
+  publishedAt     DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  createdBy       User            @relation("DiaryCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  places          DiaryPlace[]
+
+  @@index([createdById, createdAt(sort: Desc)])
+}
+
+model DiaryPlace {
+  id        String   @id @default(cuid())
+  diaryId   String
+  placeId   String
+  position  Int      @default(0)
+  note      String?
+  createdAt DateTime @default(now())
+  diary     Diary    @relation(fields: [diaryId], references: [id], onDelete: Cascade)
+  place     Place    @relation(fields: [placeId], references: [id], onDelete: Cascade)
+
+  @@unique([diaryId, placeId])
+  @@index([diaryId, createdAt(sort: Desc)])
+  @@index([diaryId, position])
+}
+
+model Notification {
+  id         String                  @id @default(cuid())
+  userId     String
+  actorId    String?
+  type       NotificationType
+  entityType NotificationEntityType?
+  entityId   String?
+  payload    Json?
+  readAt     DateTime?
+  createdAt  DateTime                @default(now())
+  updatedAt  DateTime                @updatedAt
+  user       User                    @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  actor      User?                   @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, readAt, createdAt(sort: Desc)])
+  @@index([actorId, createdAt(sort: Desc)])
+  @@index([type, createdAt(sort: Desc)])
+}
