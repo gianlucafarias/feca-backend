@@ -5,21 +5,31 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  UnprocessableEntityException,
 } from "@nestjs/common";
-import { GuideVisibility } from "@prisma/client";
+import {
+  GroupEventStatus,
+  GroupVisibility,
+  GuideVisibility,
+  MemberProposalInteraction,
+  PlaceProposalPolicy,
+} from "@prisma/client";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { randomBytes } from "node:crypto";
 
 import {
+  computeGroupEventCapabilityFlags,
+  mapApiGroupInvitePolicyToPrisma,
   mergeSerializedUserStats,
-  serializeUserSummary,
   serializeDiary,
   serializeGroup,
   serializeGroupEvent,
+  serializePublicFriendGroupPlan,
   serializeSavedPlaceRow,
   serializeSocialSettings,
   serializeSocialState,
   serializeUserPublic,
+  serializeUserSummary,
   serializeVisit,
 } from "../lib/api-presenters";
 import { PlacesRepository } from "../infrastructure/repositories/places.repository";
@@ -37,6 +47,7 @@ import { JoinGroupDto } from "./dto/join-group.dto";
 import { NotificationsService } from "./notifications.service";
 import { SearchUsersQueryDto } from "./dto/search-users.query.dto";
 import { SearchDiariesQueryDto } from "./dto/search-diaries.query.dto";
+import { UpdateGroupDto } from "./dto/update-group.dto";
 import { UpdateGroupEventRsvpDto } from "./dto/update-group-event-rsvp.dto";
 import { UpdateSocialSettingsDto } from "./dto/update-social-settings.dto";
 import { UpdateTasteDto } from "./dto/update-taste.dto";
@@ -287,7 +298,15 @@ export class SocialService {
   }
 
   async updateSocialSettings(userId: string, body: UpdateSocialSettingsDto) {
-    const settings = await this.socialRepository.updateSocialSettings(userId, body);
+    const settings = await this.socialRepository.updateSocialSettings(userId, {
+      activityVisibility: body.activityVisibility,
+      diaryVisibility: body.diaryVisibility,
+      ...(body.groupInvitePolicy !== undefined
+        ? {
+            groupInvitePolicy: mapApiGroupInvitePolicyToPrisma(body.groupInvitePolicy),
+          }
+        : {}),
+    });
 
     return {
       settings: serializeSocialSettings(settings),
@@ -393,8 +412,13 @@ export class SocialService {
         createdById: userId,
         inviteCode: generateInviteCode(),
         memberIds: body.memberIds,
+        memberProposalInteraction: body.memberProposalInteraction,
         name: body.name.trim(),
+        placeProposalPolicy: body.placeProposalPolicy,
+        visibility: body.visibility,
       });
+
+      assertNoInvitePolicyRejections(result.rejectedInvites);
 
       if (result.invitedUserIds.length > 0) {
         await this.notificationsService.publish({
@@ -463,10 +487,43 @@ export class SocialService {
       throw new NotFoundException("Group not found");
     }
 
-    await this.assertGroupAccess(userId, groupId);
+    const membership = await this.socialRepository.findGroupMembership(
+      groupId,
+      userId,
+    );
+
+    if (
+      membership &&
+      (membership.status === "accepted" || membership.status === "pending")
+    ) {
+      return {
+        group: serializeGroup(group, { viewerUserId: userId }),
+      };
+    }
+
+    if (group.visibility === GroupVisibility.private) {
+      throw new NotFoundException("Group not found");
+    }
+
+    const followedIds = new Set(
+      await this.socialRepository.listFollowedUserIds(userId),
+    );
+
+    const followsCreator = followedIds.has(group.createdById);
+    const followsActiveMember = group.members.some(
+      (member) =>
+        member.status === "accepted" && followedIds.has(member.userId),
+    );
+
+    if (!followsCreator && !followsActiveMember) {
+      throw new NotFoundException("Group not found");
+    }
 
     return {
-      group: serializeGroup(group, { viewerUserId: userId }),
+      group: serializeGroup(group, {
+        publicPreview: true,
+        viewerUserId: userId,
+      }),
     };
   }
 
@@ -492,6 +549,8 @@ export class SocialService {
       throw new NotFoundException("Group not found");
     }
 
+    assertNoInvitePolicyRejections(result.rejectedInvites);
+
     if (result.invitedUserIds.length > 0) {
       await this.notificationsService.publish({
         actorId: userId,
@@ -515,6 +574,124 @@ export class SocialService {
     };
   }
 
+  async updateGroup(userId: string, groupId: string, body: UpdateGroupDto) {
+    const group = await this.socialRepository.findGroupById(groupId);
+    if (!group) {
+      throw new NotFoundException("Group not found");
+    }
+
+    if (
+      body.name === undefined &&
+      body.visibility === undefined &&
+      body.placeProposalPolicy === undefined &&
+      body.memberProposalInteraction === undefined
+    ) {
+      throw new BadRequestException("No hay campos para actualizar");
+    }
+
+    await this.assertGroupAdminAccess(userId, groupId);
+
+    const updated = await this.socialRepository.updateGroup({
+      groupId,
+      memberProposalInteraction: body.memberProposalInteraction,
+      name: body.name,
+      placeProposalPolicy: body.placeProposalPolicy,
+      visibility: body.visibility,
+    });
+
+    return {
+      group: serializeGroup(updated, { viewerUserId: userId }),
+    };
+  }
+
+  async leaveGroup(userId: string, groupId: string) {
+    const group = await this.socialRepository.findGroupById(groupId);
+    if (!group) {
+      throw new NotFoundException("Group not found");
+    }
+
+    const result = await this.socialRepository.leaveGroup(groupId, userId);
+
+    if (!result) {
+      throw new NotFoundException("No formas parte de este plan");
+    }
+
+    if (result.kind === "owner_cannot_leave") {
+      throw new ForbiddenException(
+        "El creador no puede abandonar el plan sin transferir la administracion.",
+      );
+    }
+
+    return {
+      group: serializeGroup(result.group, { viewerUserId: userId }),
+    };
+  }
+
+  async listPublicFriendGroupPlans(userId: string, query: PaginationQueryDto) {
+    const { groups, total } =
+      await this.socialRepository.listPublicFriendGroupPlanCandidates({
+        excludeMember: true,
+        viewerId: userId,
+      });
+
+    const followedIds = new Set(
+      await this.socialRepository.listFollowedUserIds(userId),
+    );
+
+    type CandidateRow = (typeof groups)[number];
+
+    const decorated = groups.map((group: CandidateRow) => {
+      const next = pickNextEventForPublicFriendList(group.events);
+
+      return {
+        group,
+        next,
+        sortKey: next ? next.date.getTime() : null,
+      };
+    });
+
+    decorated.sort((left, right) => {
+      if (left.sortKey === null && right.sortKey === null) {
+        return (
+          left.group.name.localeCompare(right.group.name) ||
+          left.group.id.localeCompare(right.group.id)
+        );
+      }
+
+      if (left.sortKey === null) {
+        return 1;
+      }
+
+      if (right.sortKey === null) {
+        return -1;
+      }
+
+      if (left.sortKey !== right.sortKey) {
+        return left.sortKey - right.sortKey;
+      }
+
+      return (
+        left.group.name.localeCompare(right.group.name) ||
+        left.group.id.localeCompare(right.group.id)
+      );
+    });
+
+    const page = decorated.slice(query.offset, query.offset + query.limit);
+
+    const plans = page.map((row) =>
+      serializePublicFriendGroupPlan(row.group, {
+        followedMemberIds: followedIds,
+        nextEvent: row.next,
+        viewerId: userId,
+      }),
+    );
+
+    return {
+      plans,
+      total,
+    };
+  }
+
   async addGroupEvent(userId: string, groupId: string, body: AddGroupEventDto) {
     const group = await this.socialRepository.findGroupById(groupId);
     if (!group) {
@@ -523,12 +700,29 @@ export class SocialService {
 
     await this.assertGroupAccess(userId, groupId);
 
+    if (
+      group.placeProposalPolicy === PlaceProposalPolicy.owner_only &&
+      userId !== group.createdById
+    ) {
+      throw new UnprocessableEntityException({
+        code: "PROPOSAL_NOT_ALLOWED",
+        message: "Solo el creador del plan puede proponer eventos.",
+      });
+    }
+
     const place = await this.resolveWritablePlace(body);
+    const useAnnouncementStatus =
+      group.memberProposalInteraction ===
+        MemberProposalInteraction.announcement_locked && userId !== group.createdById;
+
     const event = await this.socialRepository.createGroupEvent({
       date: body.date,
       groupId,
       placeId: place.id,
       proposedById: userId,
+      status: useAnnouncementStatus
+        ? GroupEventStatus.announcement
+        : GroupEventStatus.proposed,
     });
 
     await this.notificationsService.publish({
@@ -549,7 +743,14 @@ export class SocialService {
     });
 
     return {
-      event: serializeGroupEvent(event, { viewerUserId: userId }),
+      event: serializeGroupEvent(event, {
+        group: {
+          createdById: group.createdById,
+          memberProposalInteraction: group.memberProposalInteraction,
+          placeProposalPolicy: group.placeProposalPolicy,
+        },
+        viewerUserId: userId,
+      }),
     };
   }
 
@@ -569,6 +770,22 @@ export class SocialService {
     const event = await this.socialRepository.findGroupEventById(groupId, eventId);
     if (!event) {
       throw new NotFoundException("Event not found");
+    }
+
+    const interactionFlags = computeGroupEventCapabilityFlags(
+      {
+        createdById: group.createdById,
+        memberProposalInteraction: group.memberProposalInteraction,
+        placeProposalPolicy: group.placeProposalPolicy,
+      },
+      event,
+    );
+
+    if (!interactionFlags.allowsRsvp && body.rsvp !== "none") {
+      throw new UnprocessableEntityException({
+        code: "RSVP_NOT_ALLOWED",
+        message: "Este evento no admite confirmar asistencia.",
+      });
     }
 
     const updated = await this.socialRepository.setGroupEventRsvp({
@@ -774,11 +991,17 @@ export class SocialService {
     const membership = await this.socialRepository.findGroupMembership(groupId, userId);
 
     if (!membership) {
-      throw new ForbiddenException("You do not have access to this group");
+      throw new ForbiddenException({
+        code: "GROUP_ACTION_REQUIRES_MEMBERSHIP",
+        message: "Tenés que ser miembro del plan para realizar esta acción.",
+      });
     }
 
     if (membership.status === "declined" || membership.status === "left") {
-      throw new ForbiddenException("You are no longer part of this group");
+      throw new ForbiddenException({
+        code: "GROUP_ACTION_REQUIRES_MEMBERSHIP",
+        message: "Ya no formás parte de este plan.",
+      });
     }
   }
 
@@ -786,17 +1009,85 @@ export class SocialService {
     const membership = await this.socialRepository.findGroupMembership(groupId, userId);
 
     if (!membership) {
-      throw new ForbiddenException("You do not have access to this group");
+      throw new ForbiddenException({
+        code: "GROUP_ACTION_REQUIRES_MEMBERSHIP",
+        message: "Tenés que ser miembro del plan para realizar esta acción.",
+      });
     }
 
     if (membership.status !== "accepted") {
-      throw new ForbiddenException("You cannot manage this group");
+      throw new ForbiddenException({
+        code: "GROUP_ADMIN_REQUIRED",
+        message: "Solo miembros activos pueden gestionar el plan.",
+      });
     }
 
     if (membership.role !== "owner" && membership.role !== "admin") {
-      throw new ForbiddenException("You cannot manage this group");
+      throw new ForbiddenException({
+        code: "GROUP_ADMIN_REQUIRED",
+        message: "Solo el creador o un administrador puede gestionar el plan.",
+      });
     }
   }
+}
+
+function assertNoInvitePolicyRejections(
+  rejectedInvites: Array<{ reason: string; userId: string }>,
+) {
+  if (rejectedInvites.some((entry) => entry.reason === "invite_policy")) {
+    throw new UnprocessableEntityException({
+      code: "INVITE_NOT_ALLOWED_BY_TARGET_POLICY",
+      message:
+        "Esta persona solo acepta invitaciones de usuarios que sigue.",
+    });
+  }
+}
+
+/**
+ * Próximo evento para listado "planes de amigos": fecha >= hoy (UTC), prioridad
+ * confirmed → proposed/announcement; sin eventos útiles → null (ver spec §2.6).
+ */
+function pickNextEventForPublicFriendList<
+  T extends { date: Date; status: GroupEventStatus },
+>(events: T[]): T | null {
+  if (events.length === 0) {
+    return null;
+  }
+
+  const now = new Date();
+  const startOfToday = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+
+  const futureNonCompleted = events.filter(
+    (event) =>
+      event.date >= startOfToday && event.status !== GroupEventStatus.completed,
+  );
+
+  const byDate = (
+    left: (typeof events)[number],
+    right: (typeof events)[number],
+  ) => left.date.getTime() - right.date.getTime();
+
+  const confirmed = futureNonCompleted
+    .filter((event) => event.status === GroupEventStatus.confirmed)
+    .sort(byDate);
+  if (confirmed.length > 0) {
+    return confirmed[0];
+  }
+
+  const proposedLike = futureNonCompleted
+    .filter(
+      (event) =>
+        event.status === GroupEventStatus.proposed ||
+        event.status === GroupEventStatus.announcement,
+    )
+    .sort(byDate);
+  if (proposedLike.length > 0) {
+    return proposedLike[0];
+  }
+
+  return null;
 }
 
 function generateInviteCode() {

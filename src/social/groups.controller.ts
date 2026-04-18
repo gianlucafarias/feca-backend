@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from "@nestjs/common";
 
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { AccessTokenGuard } from "../common/guards/access-token.guard";
@@ -7,6 +16,7 @@ import { AddGroupMembersDto } from "./dto/add-group-members.dto";
 import { AddGroupEventDto } from "./dto/add-group-event.dto";
 import { CreateGroupDto } from "./dto/create-group.dto";
 import { JoinGroupDto } from "./dto/join-group.dto";
+import { UpdateGroupDto } from "./dto/update-group.dto";
 import { UpdateGroupEventRsvpDto } from "./dto/update-group-event-rsvp.dto";
 import { SocialService } from "./social.service";
 
@@ -37,6 +47,24 @@ export class GroupsController {
     @Param("id") groupId: string,
   ) {
     return this.socialService.getGroup(user.sub, groupId);
+  }
+
+  @Patch(":id")
+  updateGroup(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param("id") groupId: string,
+    @Body() body: UpdateGroupDto,
+  ) {
+    return this.socialService.updateGroup(user.sub, groupId, body);
+  }
+
+  @Post(":id/leave")
+  @HttpCode(200)
+  leaveGroup(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param("id") groupId: string,
+  ) {
+    return this.socialService.leaveGroup(user.sub, groupId);
   }
 
   @Post(":id/members")

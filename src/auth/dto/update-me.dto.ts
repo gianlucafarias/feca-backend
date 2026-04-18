@@ -1,5 +1,6 @@
 import { Transform } from "class-transformer";
 import {
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -64,4 +65,8 @@ export class UpdateMeDto {
   @Min(-180)
   @Max(180)
   lng?: number;
+
+  @IsOptional()
+  @IsIn(["everyone", "from_following_only"])
+  groupInvitePolicy?: "everyone" | "from_following_only";
 }

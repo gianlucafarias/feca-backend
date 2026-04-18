@@ -2,10 +2,14 @@ import { Injectable } from "@nestjs/common";
 import {
   ContentVisibility,
   GroupEventRsvpStatus,
+  GroupEventStatus,
   GroupInvitePolicy,
   GroupMemberRole,
   GroupMemberStatus,
+  GroupVisibility,
   GuideVisibility,
+  MemberProposalInteraction,
+  PlaceProposalPolicy,
   Prisma,
   type UserSettings,
 } from "@prisma/client";
@@ -571,7 +575,10 @@ export class SocialRepository {
     createdById: string;
     inviteCode: string;
     memberIds: string[];
+    memberProposalInteraction?: MemberProposalInteraction;
     name: string;
+    placeProposalPolicy?: PlaceProposalPolicy;
+    visibility?: GroupVisibility;
   }) {
     await this.ensureUserSettingsForAllUsers();
 
@@ -636,6 +643,8 @@ export class SocialRepository {
       data: {
         createdById: input.createdById,
         inviteCode: input.inviteCode,
+        memberProposalInteraction:
+          input.memberProposalInteraction ?? MemberProposalInteraction.collaborative,
         members: {
           create: [
             {
@@ -652,6 +661,9 @@ export class SocialRepository {
           ],
         },
         name: input.name,
+        placeProposalPolicy:
+          input.placeProposalPolicy ?? PlaceProposalPolicy.all_members,
+        visibility: input.visibility ?? GroupVisibility.private,
       },
       include: groupInclude,
     });
@@ -916,6 +928,7 @@ export class SocialRepository {
     groupId: string;
     placeId: string;
     proposedById: string;
+    status?: GroupEventStatus;
   }) {
     return this.prisma.groupEvent.create({
       data: {
@@ -923,9 +936,163 @@ export class SocialRepository {
         groupId: input.groupId,
         placeId: input.placeId,
         proposedById: input.proposedById,
+        status: input.status ?? GroupEventStatus.proposed,
       },
       include: groupEventInclude,
     });
+  }
+
+  async updateGroup(input: {
+    groupId: string;
+    memberProposalInteraction?: MemberProposalInteraction;
+    name?: string;
+    placeProposalPolicy?: PlaceProposalPolicy;
+    visibility?: GroupVisibility;
+  }) {
+    return this.prisma.group.update({
+      data: {
+        ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+        ...(input.visibility !== undefined ? { visibility: input.visibility } : {}),
+        ...(input.placeProposalPolicy !== undefined
+          ? { placeProposalPolicy: input.placeProposalPolicy }
+          : {}),
+        ...(input.memberProposalInteraction !== undefined
+          ? { memberProposalInteraction: input.memberProposalInteraction }
+          : {}),
+      },
+      include: groupInclude,
+      where: { id: input.groupId },
+    });
+  }
+
+  async leaveGroup(groupId: string, userId: string) {
+    const membership = await this.prisma.groupMember.findUnique({
+      where: {
+        groupId_userId: {
+          groupId,
+          userId,
+        },
+      },
+    });
+
+    if (!membership) {
+      return null;
+    }
+
+    if (membership.role === GroupMemberRole.owner) {
+      return { kind: "owner_cannot_leave" as const };
+    }
+
+    if (
+      membership.status !== GroupMemberStatus.accepted &&
+      membership.status !== GroupMemberStatus.pending
+    ) {
+      return null;
+    }
+
+    await this.prisma.groupMember.update({
+      data: {
+        status: GroupMemberStatus.left,
+      },
+      where: { id: membership.id },
+    });
+
+    const group = await this.prisma.group.findUnique({
+      include: groupInclude,
+      where: { id: groupId },
+    });
+
+    if (!group) {
+      return null;
+    }
+
+    return { group, kind: "left" as const };
+  }
+
+  async viewerFollowsUser(viewerId: string, targetUserId: string) {
+    const row = await this.prisma.userFollow.findUnique({
+      where: {
+        followerId_followedId: {
+          followedId: targetUserId,
+          followerId: viewerId,
+        },
+      },
+      select: { id: true },
+    });
+
+    return Boolean(row);
+  }
+
+  async listFollowedUserIds(viewerId: string) {
+    const rows = await this.prisma.userFollow.findMany({
+      select: { followedId: true },
+      where: { followerId: viewerId },
+    });
+
+    return rows.map((row) => row.followedId);
+  }
+
+  /**
+   * Candidatos para GET /v1/me/friends/public-group-plans (sin paginar).
+   * El orden estable (por nextEvent, nombre, id) se aplica en SocialService.
+   */
+  async listPublicFriendGroupPlanCandidates(input: {
+    excludeMember: boolean;
+    viewerId: string;
+  }) {
+    const followingIds = await this.listFollowedUserIds(input.viewerId);
+
+    if (followingIds.length === 0) {
+      return { groups: [], total: 0 };
+    }
+
+    const memberMatch = {
+      some: {
+        status: GroupMemberStatus.accepted,
+        userId: { in: followingIds },
+      },
+    };
+
+    const whereFixed: Prisma.GroupWhereInput = {
+      AND: [
+        { visibility: GroupVisibility.public_followers },
+        { members: memberMatch },
+        ...(input.excludeMember
+          ? [
+              {
+                members: {
+                  none: {
+                    userId: input.viewerId,
+                    status: {
+                      in: [GroupMemberStatus.accepted, GroupMemberStatus.pending],
+                    },
+                  },
+                },
+              } as Prisma.GroupWhereInput,
+            ]
+          : []),
+      ],
+    };
+
+    const [total, groups] = await Promise.all([
+      this.prisma.group.count({ where: whereFixed }),
+      this.prisma.group.findMany({
+        include: {
+          createdBy: true,
+          events: {
+            include: { place: true },
+            orderBy: [{ date: "asc" }],
+          },
+          members: {
+            include: { user: true },
+            where: { status: GroupMemberStatus.accepted },
+          },
+        },
+        where: whereFixed,
+      }),
+    ]);
+
+    return { groups, total };
   }
 
   async setGroupEventRsvp(input: {

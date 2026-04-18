@@ -15,6 +15,12 @@ import type {
   UserSettings,
   Visit,
 } from "@prisma/client";
+import {
+  GroupEventStatus,
+  GroupInvitePolicy,
+  MemberProposalInteraction,
+  PlaceProposalPolicy,
+} from "@prisma/client";
 
 type UserStats = {
   followersCount: number;
@@ -178,11 +184,32 @@ export function serializeUserStats(stats: UserStats) {
   };
 }
 
+/** Valores expuestos en API para alinear con el cliente móvil. */
+export type ApiGroupInvitePolicy = "everyone" | "from_following_only";
+
+export function mapGroupInvitePolicyToApi(
+  policy: GroupInvitePolicy,
+): ApiGroupInvitePolicy {
+  if (policy === GroupInvitePolicy.following_only) {
+    return "from_following_only";
+  }
+
+  return "everyone";
+}
+
+export function mapApiGroupInvitePolicyToPrisma(
+  policy: ApiGroupInvitePolicy,
+): GroupInvitePolicy {
+  return policy === "from_following_only"
+    ? GroupInvitePolicy.following_only
+    : GroupInvitePolicy.anyone;
+}
+
 export function serializeSocialSettings(settings: SocialSettingsView) {
   return {
     activityVisibility: settings.activityVisibility,
     diaryVisibility: settings.diaryVisibility,
-    groupInvitePolicy: settings.groupInvitePolicy,
+    groupInvitePolicy: mapGroupInvitePolicyToApi(settings.groupInvitePolicy),
   };
 }
 
@@ -198,6 +225,21 @@ export function serializePlaceSummary(place: Place) {
   return {
     address: place.address,
     googlePlaceId: place.sourcePlaceId ?? null,
+    id: place.id,
+    name: place.name,
+    photoUrl: place.coverPhotoUrl ?? null,
+  };
+}
+
+/**
+ * Vista no miembro de plan público: evita domicilio fino; usa ciudad/barrio como "zona".
+ * Sin googlePlaceId en payload para reducir scraping (listado / preview).
+ */
+export function serializePlaceSummaryForPublicGroupViewer(place: Place) {
+  const area = place.city?.trim();
+  return {
+    address: area && area.length > 0 ? area : place.name,
+    googlePlaceId: null,
     id: place.id,
     name: place.name,
     photoUrl: place.coverPhotoUrl ?? null,
@@ -265,20 +307,90 @@ export function serializeNotification(notification: NotificationWithRelations) {
   };
 }
 
+type GroupEventCapabilityContext = Pick<
+  Group,
+  "createdById" | "memberProposalInteraction" | "placeProposalPolicy"
+>;
+
+export function computeGroupEventCapabilityFlags(
+  group: GroupEventCapabilityContext,
+  event: Pick<GroupEvent, "proposedById" | "status">,
+) {
+  if (event.status === GroupEventStatus.completed) {
+    return {
+      allowsConfirm: false,
+      allowsCounterProposals: false,
+      allowsRsvp: false,
+    };
+  }
+
+  if (event.status === GroupEventStatus.announcement) {
+    return {
+      allowsConfirm: false,
+      allowsCounterProposals: false,
+      allowsRsvp: false,
+    };
+  }
+
+  if (event.status === GroupEventStatus.confirmed) {
+    return {
+      allowsConfirm: false,
+      allowsCounterProposals: false,
+      allowsRsvp: true,
+    };
+  }
+
+  const isOwnerProposal = event.proposedById === group.createdById;
+  const lockedMemberProposal =
+    group.memberProposalInteraction === MemberProposalInteraction.announcement_locked &&
+    !isOwnerProposal;
+
+  if (lockedMemberProposal) {
+    return {
+      allowsConfirm: false,
+      allowsCounterProposals: false,
+      allowsRsvp: false,
+    };
+  }
+
+  return {
+    allowsConfirm: true,
+    allowsCounterProposals: group.placeProposalPolicy === PlaceProposalPolicy.all_members,
+    allowsRsvp: true,
+  };
+}
+
 export function serializeGroupEvent(
   event: GroupEventWithRelations,
-  options?: { viewerUserId?: string },
+  options?: {
+    group: GroupEventCapabilityContext;
+    redactPlaceForPublic?: boolean;
+    viewerUserId?: string;
+  },
 ) {
   const myRsvp = options?.viewerUserId
     ? event.rsvps?.find((rsvp) => rsvp.userId === options.viewerUserId)?.rsvp ??
       "none"
     : undefined;
 
+  const flags = options?.group
+    ? computeGroupEventCapabilityFlags(options.group, event)
+    : {
+        allowsConfirm: false,
+        allowsCounterProposals: false,
+        allowsRsvp: true,
+      };
+
+  const placePayload = options?.redactPlaceForPublic
+    ? serializePlaceSummaryForPublicGroupViewer(event.place)
+    : serializePlaceSummary(event.place);
+
   return {
+    ...flags,
     date: formatDateOnly(event.date),
     id: event.id,
     myRsvp,
-    place: serializePlaceSummary(event.place),
+    place: placePayload,
     proposedBy: serializeUserPublic(event.proposedBy),
     status: event.status,
   };
@@ -286,24 +398,150 @@ export function serializeGroupEvent(
 
 export function serializeGroup(
   group: GroupWithRelations,
-  options?: { viewerUserId?: string },
+  options?: { publicPreview?: boolean; viewerUserId?: string },
 ) {
+  const acceptedCount = group.members.filter(
+    (member) => member.status === "accepted",
+  ).length;
+
+  const myMembership = options?.viewerUserId
+    ? group.members.find((member) => member.userId === options.viewerUserId)
+    : undefined;
+
+  const viewerMembership: "active" | "invited" | "none" | undefined = options?.publicPreview
+    ? "none"
+    : myMembership?.status === "accepted"
+      ? "active"
+      : myMembership?.status === "pending"
+        ? "invited"
+        : myMembership
+          ? "none"
+          : undefined;
+
+  const groupContext: GroupEventCapabilityContext = {
+    createdById: group.createdById,
+    memberProposalInteraction: group.memberProposalInteraction,
+    placeProposalPolicy: group.placeProposalPolicy,
+  };
+
   return {
     createdBy: serializeUserPublic(group.createdBy),
-    events: group.events.map((event) => serializeGroupEvent(event, options)),
+    events: group.events.map((event) =>
+      serializeGroupEvent(event, {
+        group: groupContext,
+        redactPlaceForPublic: options?.publicPreview,
+        viewerUserId: options?.viewerUserId,
+      }),
+    ),
     id: group.id,
-    inviteCode: group.inviteCode,
-    members: group.members.map((member) => ({
-      accepted: member.status === "accepted",
-      invitedBy: member.invitedBy
-        ? serializeUserPublic(member.invitedBy)
-        : undefined,
-      role: member.role,
-      status: mapGroupMemberStatus(member.status),
-      user: serializeUserPublic(member.user),
-    })),
+    inviteCode: options?.publicPreview ? null : group.inviteCode,
+    memberCount: acceptedCount,
+    memberProposalInteraction: group.memberProposalInteraction,
+    members: options?.publicPreview
+      ? []
+      : group.members.map((member) => ({
+          accepted: member.status === "accepted",
+          invitedBy: member.invitedBy
+            ? serializeUserPublic(member.invitedBy)
+            : undefined,
+          role: member.role,
+          status: mapGroupMemberStatus(member.status),
+          user: serializeUserPublic(member.user),
+        })),
     name: group.name,
+    placeProposalPolicy: group.placeProposalPolicy,
+    visibility: group.visibility,
+    ...(viewerMembership !== undefined ? { viewerMembership } : {}),
   };
+}
+
+export type PublicFriendGroupPlanRow = {
+  createdBy: User;
+  events: Array<{
+    date: Date;
+    place: Place;
+    status: GroupEvent["status"];
+  }>;
+  id: string;
+  members: GroupMemberWithRelations[];
+  name: string;
+};
+
+export function serializePublicFriendGroupPlan(
+  group: PublicFriendGroupPlanRow,
+  options: {
+    followedMemberIds: Set<string>;
+    nextEvent: PublicFriendGroupPlanRow["events"][number] | null;
+    viewerId: string;
+  },
+) {
+  const friendParticipantUser = pickFriendParticipant(
+    group.members,
+    options.followedMemberIds,
+    options.viewerId,
+  );
+
+  const next = options.nextEvent;
+
+  /**
+   * ApiGroupEventStatus en cliente: proposed | confirmed | completed.
+   * "announcement" se expone como proposed en el resumen de listado.
+   */
+  const nextStatusForApi = next
+    ? next.status === GroupEventStatus.announcement
+      ? ("proposed" as const)
+      : next.status === GroupEventStatus.proposed ||
+          next.status === GroupEventStatus.confirmed ||
+          next.status === GroupEventStatus.completed
+        ? next.status
+        : ("proposed" as const)
+    : null;
+
+  const areaRaw = next?.place.city?.trim();
+  const placeTitle = next?.place.name?.trim() ?? "";
+
+  return {
+    createdBy: serializeUserPublic(group.createdBy),
+    friendParticipant: friendParticipantUser
+      ? serializeUserPublic(friendParticipantUser)
+      : null,
+    id: group.id,
+    memberCount: group.members.filter((m) => m.status === "accepted").length,
+    name: group.name,
+    nextEvent: next && nextStatusForApi
+      ? {
+          ...(areaRaw && areaRaw.length > 0 ? { areaLabel: areaRaw } : {}),
+          date: formatDateOnly(next.date),
+          placeName: placeTitle,
+          status: nextStatusForApi,
+        }
+      : null,
+  };
+}
+
+/**
+ * Elegible: miembro activo que el viewer sigue (distinto del viewer).
+ * Estabilidad entre páginas: menor user_id lexicográfico (ver spec §2.5).
+ */
+function pickFriendParticipant(
+  members: GroupMemberWithRelations[],
+  followedMemberIds: Set<string>,
+  viewerId: string,
+) {
+  const candidates = members.filter(
+    (member) =>
+      member.status === "accepted" &&
+      member.userId !== viewerId &&
+      followedMemberIds.has(member.userId),
+  );
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  candidates.sort((left, right) => left.userId.localeCompare(right.userId));
+
+  return candidates[0].user;
 }
 
 export function serializeDiary(diary: DiaryWithRelations) {

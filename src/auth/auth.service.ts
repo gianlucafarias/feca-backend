@@ -16,6 +16,8 @@ import { GooglePlacesClient } from "../infrastructure/google-places/google-place
 import { CitiesRepository } from "../infrastructure/repositories/cities.repository";
 import { SocialRepository } from "../infrastructure/repositories/social.repository";
 import {
+  mapApiGroupInvitePolicyToPrisma,
+  mapGroupInvitePolicyToApi,
   mergeSerializedUserStats,
   serializeAuthenticatedUser,
 } from "../lib/api-presenters";
@@ -77,9 +79,10 @@ export class AuthService {
   }
 
   async getMe(userId: string) {
-    const [user, stats] = await Promise.all([
+    const [user, stats, socialSettings] = await Promise.all([
       this.authRepository.findUserByIdWithCity(userId),
       this.socialRepository.getProfileStats(userId),
+      this.socialRepository.getSocialSettings(userId),
     ]);
 
     if (!user) {
@@ -87,10 +90,13 @@ export class AuthService {
     }
 
     return {
-      user: mergeSerializedUserStats(
-        serializeAuthenticatedUser(user),
-        stats,
-      ),
+      user: {
+        ...mergeSerializedUserStats(
+          serializeAuthenticatedUser(user),
+          stats,
+        ),
+        groupInvitePolicy: mapGroupInvitePolicyToApi(socialSettings.groupInvitePolicy),
+      },
     };
   }
 
@@ -119,16 +125,35 @@ export class AuthService {
         : undefined;
 
     try {
+      const { groupInvitePolicy: _groupInvitePolicy, ...profileInput } = input;
+
       const updatedUser = await this.authRepository.updateUserProfile(
         userId,
         {
-          ...input,
+          ...profileInput,
           cityId,
         },
       );
 
+      const [socialSettings, stats] = await Promise.all([
+        input.groupInvitePolicy !== undefined
+          ? this.socialRepository.updateSocialSettings(userId, {
+              groupInvitePolicy: mapApiGroupInvitePolicyToPrisma(
+                input.groupInvitePolicy,
+              ),
+            })
+          : this.socialRepository.getSocialSettings(userId),
+        this.socialRepository.getProfileStats(userId),
+      ]);
+
       return {
-        user: serializeAuthenticatedUser(updatedUser),
+        user: {
+          ...mergeSerializedUserStats(
+            serializeAuthenticatedUser(updatedUser),
+            stats,
+          ),
+          groupInvitePolicy: mapGroupInvitePolicyToApi(socialSettings.groupInvitePolicy),
+        },
       };
     } catch (error) {
       if (

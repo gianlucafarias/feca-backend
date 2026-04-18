@@ -31,8 +31,24 @@ enum GroupInvitePolicy {
 
 enum GroupEventStatus {
   proposed
+  announcement
   confirmed
   completed
+}
+
+enum GroupVisibility {
+  private
+  public_followers
+}
+
+enum PlaceProposalPolicy {
+  all_members
+  owner_only
+}
+
+enum MemberProposalInteraction {
+  collaborative
+  announcement_locked
 }
 
 enum GroupMemberRole {
@@ -265,17 +281,21 @@ model PlaceSave {
 }
 
 model Group {
-  id          String        @id @default(cuid())
-  name        String
-  createdById String
-  inviteCode  String        @unique
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  createdBy   User          @relation("GroupCreator", fields: [createdById], references: [id], onDelete: Cascade)
-  members     GroupMember[]
-  events      GroupEvent[]
+  id                        String                    @id @default(cuid())
+  name                      String
+  createdById               String
+  inviteCode                String                    @unique
+  visibility                GroupVisibility           @default(private)
+  placeProposalPolicy       PlaceProposalPolicy       @default(all_members)
+  memberProposalInteraction MemberProposalInteraction @default(collaborative)
+  createdAt                 DateTime                  @default(now())
+  updatedAt                 DateTime                  @updatedAt
+  createdBy                 User                      @relation("GroupCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  members                   GroupMember[]
+  events                    GroupEvent[]
 
   @@index([createdById, createdAt(sort: Desc)])
+  @@index([visibility, createdAt(sort: Desc)])
 }
 
 model GroupMember {

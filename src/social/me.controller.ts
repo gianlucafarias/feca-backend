@@ -72,6 +72,14 @@ export class MeController {
     return this.socialService.listMyGroups(user.sub);
   }
 
+  @Get("friends/public-group-plans")
+  listPublicFriendGroupPlans(
+    @CurrentUser() user: AccessTokenPayload,
+    @Query() query: PaginationQueryDto,
+  ) {
+    return this.socialService.listPublicFriendGroupPlans(user.sub, query);
+  }
+
   @Get("diaries")
   getMyDiaries(@CurrentUser() user: AccessTokenPayload) {
     return this.socialService.listMyDiaries(user.sub);

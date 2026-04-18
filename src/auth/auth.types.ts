@@ -11,6 +11,7 @@ export type UpdateUserProfileInput = {
   city?: string;
   cityGooglePlaceId?: string;
   displayName?: string;
+  groupInvitePolicy?: "everyone" | "from_following_only";
   lat?: number;
   lng?: number;
   username?: string;

@@ -1,13 +1,4 @@
-import {
-  ArrayMaxSize,
-  ArrayUnique,
-  IsArray,
-  IsEnum,
-  IsOptional,
-  IsString,
-  MaxLength,
-  MinLength,
-} from "class-validator";
+import { IsEnum, IsOptional, IsString, MaxLength, MinLength } from "class-validator";
 
 import {
   GroupVisibility,
@@ -15,17 +6,12 @@ import {
   PlaceProposalPolicy,
 } from "@prisma/client";
 
-export class CreateGroupDto {
+export class UpdateGroupDto {
+  @IsOptional()
   @IsString()
   @MinLength(1)
   @MaxLength(80)
-  name!: string;
-
-  @IsArray()
-  @ArrayUnique()
-  @ArrayMaxSize(50)
-  @IsString({ each: true })
-  memberIds!: string[];
+  name?: string;
 
   @IsOptional()
   @IsEnum(GroupVisibility)
