@@ -57,14 +57,33 @@ export class SocialService {
         ?.tastePreferenceIds ?? [];
 
     let cityIdOverride: string | undefined;
-    if (query.mode === "city" && query.cityGooglePlaceId) {
-      try {
-        const city = await this.placesService.getOrCreateCityRecordByGooglePlaceId(
-          query.cityGooglePlaceId,
-        );
-        cityIdOverride = city.id;
-      } catch {
-        cityIdOverride = undefined;
+    if (query.mode === "city") {
+      if (query.cityGooglePlaceId) {
+        try {
+          const city = await this.placesService.getOrCreateCityRecordByGooglePlaceId(
+            query.cityGooglePlaceId,
+          );
+          cityIdOverride = city.id;
+        } catch {
+          cityIdOverride = undefined;
+        }
+      }
+      if (
+        !cityIdOverride &&
+        typeof query.lat === "number" &&
+        Number.isFinite(query.lat) &&
+        typeof query.lng === "number" &&
+        Number.isFinite(query.lng)
+      ) {
+        try {
+          const city = await this.placesService.getOrCreateCityRecordFromCoordinates(
+            query.lat,
+            query.lng,
+          );
+          cityIdOverride = city.id;
+        } catch {
+          cityIdOverride = undefined;
+        }
       }
     }
 

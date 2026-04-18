@@ -206,6 +206,11 @@ export class PlacesService {
     return this.ensureStoredCityByGooglePlaceId(cityGooglePlaceId);
   }
 
+  /** Ciudad canónica a partir de coordenadas (misma lógica que lugares / perfil). */
+  async getOrCreateCityRecordFromCoordinates(lat: number, lng: number) {
+    return this.ensureStoredCityForCoordinates(lat, lng);
+  }
+
   async resolve(input: ResolvePlaceDto) {
     const existing = await this.placesRepository.getPlaceBySource(
       input.source,
