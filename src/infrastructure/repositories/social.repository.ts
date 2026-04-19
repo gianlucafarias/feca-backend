@@ -1436,6 +1436,7 @@ export class SocialRepository {
           wouldReturn: v.wouldReturn,
           displayName: v.user.displayName || v.user.username,
           username: v.user.username,
+          visitedAt: v.visitedAt,
         };
         if (!prev) {
           userVisitMap.set(v.userId, v);
@@ -1446,6 +1447,7 @@ export class SocialRepository {
           wouldReturn: prev.wouldReturn,
           displayName: prev.user.displayName || prev.user.username,
           username: prev.user.username,
+          visitedAt: prev.visitedAt,
         };
         if (scoreNearbyVisitSignal(nextSource) > scoreNearbyVisitSignal(prevSource)) {
           userVisitMap.set(v.userId, v);
@@ -1467,6 +1469,7 @@ export class SocialRepository {
           wouldReturn: visit.wouldReturn,
           displayName: visit.user.displayName || visit.user.username,
           username: visit.user.username,
+          visitedAt: visit.visitedAt,
         };
         const snippet = formatFriendSnippetFromVisit(source);
         signals.push({
@@ -1498,7 +1501,7 @@ export class SocialRepository {
         if (visitedUserIds.has(save.userId)) {
           continue;
         }
-        const saveSnippet = formatFriendSnippetFromSave();
+        const saveSnippet = formatFriendSnippetFromSave(save.createdAt);
         signals.push({
           userId: save.userId,
           score: 26,

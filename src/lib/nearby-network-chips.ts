@@ -10,14 +10,32 @@ export type NearbyFriendSocialRow = {
 export type NearbyVisitChipSource = {
   rating: number;
   wouldReturn: VisitWouldReturn | null;
-  /** Conservado por compatibilidad; el texto del chip usa `username`. */
+  /** Conservado por compatibilidad; el chip usa `username`. */
   displayName: string;
   username: string;
+  /** Fecha de la visita (para “visitó recientemente”). */
+  visitedAt?: Date | string | null;
 };
+
+const MS_PER_DAY = 86_400_000;
+
+function isWithinDays(
+  visitedAt: Date | string | null | undefined,
+  days: number,
+): boolean {
+  if (visitedAt == null) {
+    return false;
+  }
+  const d = typeof visitedAt === "string" ? new Date(visitedAt) : visitedAt;
+  if (Number.isNaN(d.getTime())) {
+    return false;
+  }
+  return Date.now() - d.getTime() <= days * MS_PER_DAY;
+}
 
 /** Texto corto junto al @usuario (sin nombre completo). */
 export function formatFriendSnippetFromVisit(
-  visit: Pick<NearbyVisitChipSource, "rating" | "wouldReturn">,
+  visit: Pick<NearbyVisitChipSource, "rating" | "wouldReturn" | "visitedAt">,
 ): string {
   if (visit.wouldReturn === "yes") {
     return "volvería a ir";
@@ -31,13 +49,21 @@ export function formatFriendSnippetFromVisit(
   if (visit.wouldReturn === "no") {
     return "pasó por acá";
   }
+  if (isWithinDays(visit.visitedAt ?? null, 21)) {
+    return "visitó recientemente";
+  }
   if (visit.rating >= 4) {
     return "le gustó";
   }
   return "visitó el lugar";
 }
 
-export function formatFriendSnippetFromSave(): string {
+export function formatFriendSnippetFromSave(
+  createdAt?: Date | string | null,
+): string {
+  if (isWithinDays(createdAt ?? null, 5)) {
+    return "lo guardó hace poco";
+  }
   return "quiere ir";
 }
 
@@ -63,6 +89,11 @@ export function scoreNearbyVisitSignal(visit: NearbyVisitChipSource): number {
     score += 55;
   } else if (visit.wouldReturn === "no") {
     score -= 10;
+  }
+  /** Las visitas reales deben ganar a un simple guardado (score ~26) en el mix. */
+  score += 40;
+  if (isWithinDays(visit.visitedAt ?? null, 14)) {
+    score += 12;
   }
   return score;
 }
