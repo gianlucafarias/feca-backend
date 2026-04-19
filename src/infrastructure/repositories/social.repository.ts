@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { Injectable } from "@nestjs/common";
 import {
   ContentVisibility,
@@ -216,6 +218,86 @@ export class SocialRepository {
       total,
       users,
     };
+  }
+
+  /**
+   * Usuarios aleatorios para el onboarding (excluye al viewer y a quienes ya sigue).
+   * Si `cityGooglePlaceId` coincide con la ciudad canónica del viewer, se prioriza ese cityId;
+   * si no alcanza `limit`, se completa con candidatos del resto de la plataforma.
+   */
+  async listSuggestedOnboardingUsers(
+    viewerId: string,
+    options: { limit: number; cityGooglePlaceId?: string | null },
+  ) {
+    const limit = Math.min(Math.max(options.limit, 1), 10);
+
+    const viewer = await this.prisma.user.findUnique({
+      where: { id: viewerId },
+      select: {
+        cityId: true,
+        cityRef: { select: { googlePlaceId: true } },
+      },
+    });
+
+    const paramCity = options.cityGooglePlaceId?.trim() ?? "";
+    let restrictCityId: string | null = null;
+    if (
+      paramCity.length > 0 &&
+      viewer?.cityRef?.googlePlaceId === paramCity &&
+      viewer.cityId
+    ) {
+      restrictCityId = viewer.cityId;
+    }
+
+    const followingRows = await this.prisma.userFollow.findMany({
+      where: { followerId: viewerId },
+      select: { followedId: true },
+    });
+    const excludeIds = new Set<string>([
+      viewerId,
+      ...followingRows.map((row) => row.followedId),
+    ]);
+    const notIn = Array.from(excludeIds);
+
+    const poolCap = Math.max(limit * 20, 60);
+
+    const fetchPool = async (cityId: string | null) =>
+      this.prisma.user.findMany({
+        where: {
+          id: { notIn },
+          ...(cityId ? { cityId } : {}),
+        },
+        select: {
+          avatarUrl: true,
+          city: true,
+          displayName: true,
+          id: true,
+          username: true,
+        },
+        take: poolCap,
+        orderBy: { createdAt: "desc" },
+      });
+
+    let pool = await fetchPool(restrictCityId);
+
+    if (pool.length < limit && restrictCityId) {
+      const global = await fetchPool(null);
+      const seen = new Set(pool.map((u) => u.id));
+      for (const row of global) {
+        if (seen.size >= poolCap) {
+          break;
+        }
+        if (!seen.has(row.id)) {
+          seen.add(row.id);
+          pool.push(row);
+        }
+      }
+    }
+
+    const seedMaterial = `${viewerId}:${new Date().toISOString().slice(0, 10)}`;
+    const shuffled = shuffleDeterministic(pool, seedMaterial).slice(0, limit);
+
+    return { total: shuffled.length, users: shuffled };
   }
 
   async getUserPlaceCreationContext(userId: string) {
@@ -2270,4 +2352,31 @@ function buildBestMoments(visits: VisitWithRelations[]) {
   }
 
   return lines.slice(0, 4);
+}
+
+function mulberry32(seed: number) {
+  return () => {
+    let t = (seed += 0x6d2b79f5);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shuffleDeterministic<T>(items: T[], seedMaterial: string): T[] {
+  if (items.length <= 1) {
+    return [...items];
+  }
+  const hash = createHash("sha256").update(seedMaterial).digest();
+  const seed =
+    hash.readUInt32BE(0) ^ hash.readUInt32BE(4) ^ hash.readUInt32BE(8);
+  const rnd = mulberry32(seed >>> 0);
+  const arr = [...items];
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rnd() * (i + 1));
+    const tmp = arr[i]!;
+    arr[i] = arr[j]!;
+    arr[j] = tmp;
+  }
+  return arr;
 }

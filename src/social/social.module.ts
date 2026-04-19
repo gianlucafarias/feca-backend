@@ -8,6 +8,7 @@ import { FeedController } from "./feed.controller";
 import { HomeController } from "./home.controller";
 import { GroupsController } from "./groups.controller";
 import { MeController } from "./me.controller";
+import { OnboardingController } from "./onboarding.controller";
 import { NotificationsService } from "./notifications.service";
 import { PlaceSavesController } from "./place-saves.controller";
 import { SocialService } from "./social.service";
@@ -22,6 +23,7 @@ import { UsersController } from "./users.controller";
     GroupsController,
     HomeController,
     MeController,
+    OnboardingController,
     PlaceSavesController,
     TasteController,
     UsersController,

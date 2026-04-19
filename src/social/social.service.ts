@@ -47,6 +47,7 @@ import { FeedQueryDto } from "./dto/feed-query.dto";
 import { JoinGroupDto } from "./dto/join-group.dto";
 import { NotificationsService } from "./notifications.service";
 import { SearchUsersQueryDto } from "./dto/search-users.query.dto";
+import { SuggestedOnboardingUsersQueryDto } from "./dto/suggested-onboarding-users.query.dto";
 import { SearchDiariesQueryDto } from "./dto/search-diaries.query.dto";
 import { UpdateDiaryDto } from "./dto/update-diary.dto";
 import { UpdateGroupDto } from "./dto/update-group.dto";
@@ -222,6 +223,24 @@ export class SocialService {
       ...query,
       q: normalizedQuery,
     });
+
+    return {
+      total: result.total,
+      users: result.users.map(serializeUserSummary),
+    };
+  }
+
+  async listSuggestedOnboardingUsers(
+    userId: string,
+    query: SuggestedOnboardingUsersQueryDto,
+  ) {
+    const result = await this.socialRepository.listSuggestedOnboardingUsers(
+      userId,
+      {
+        cityGooglePlaceId: query.cityGooglePlaceId,
+        limit: query.limit ?? 6,
+      },
+    );
 
     return {
       total: result.total,
