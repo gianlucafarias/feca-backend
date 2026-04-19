@@ -7,7 +7,8 @@ export type GoogleIdentityProfile = {
 };
 
 export type UpdateUserProfileInput = {
-  bio?: string;
+  /** `null` borra la biografía en base de datos. */
+  bio?: string | null;
   city?: string;
   cityGooglePlaceId?: string;
   displayName?: string;

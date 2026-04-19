@@ -39,6 +39,25 @@ export class UpdateMeDto {
   username?: string;
 
   @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined) {
+      return undefined;
+    }
+    if (value === null) {
+      return null;
+    }
+    if (typeof value !== "string") {
+      return value;
+    }
+    const trimmed = value.trim();
+    return trimmed.length === 0 ? null : trimmed;
+  })
+  @ValidateIf((_, v) => v !== undefined && v !== null)
+  @IsString()
+  @MaxLength(280)
+  bio?: string | null;
+
+  @IsOptional()
   @Transform(({ value }) => normalizeOptionalText(value))
   @IsString()
   @MaxLength(50)

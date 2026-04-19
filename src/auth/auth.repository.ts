@@ -203,6 +203,12 @@ export class AuthRepository {
     });
   }
 
+  deleteUserById(userId: string) {
+    return this.prisma.user.delete({
+      where: { id: userId },
+    });
+  }
+
   createSession(input: {
     expiresAt: Date;
     ipAddress?: string;

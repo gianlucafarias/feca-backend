@@ -1,7 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Patch,
   Post,
   UseGuards,
@@ -49,5 +52,13 @@ export class AuthController {
     @Body() body: UpdateMeDto,
   ) {
     return this.authService.updateMe(user.sub, body);
+  }
+
+  /** Elimina el usuario y datos asociados (cascada en base de datos). Irreversible. */
+  @Delete("me")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(AccessTokenGuard)
+  deleteMe(@CurrentUser() user: AccessTokenPayload) {
+    return this.authService.deleteMyAccount(user.sub);
   }
 }

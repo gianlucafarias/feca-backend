@@ -108,6 +108,14 @@ export class AuthService {
     return this.getMe(userId);
   }
 
+  async deleteMyAccount(userId: string): Promise<void> {
+    const user = await this.authRepository.findUserById(userId);
+    if (!user) {
+      throw new UnauthorizedException("User not found");
+    }
+    await this.authRepository.deleteUserById(userId);
+  }
+
   async updateMe(userId: string, input: UpdateUserProfileInput) {
     const user = await this.authRepository.findUserById(userId);
 
