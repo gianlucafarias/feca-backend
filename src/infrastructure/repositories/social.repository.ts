@@ -1302,29 +1302,34 @@ export class SocialRepository {
   }
 
   /**
-   * Chips cortos por lugar (googlePlaceId) para carruseles tipo home:
-   * volvería a ir, visitado por…, le gustaría ir (save sin visita), etc.
+   * Señales de red por googlePlaceId: chips para UI y boost numérico para rankear
+   * el modo `home_network` (sin duplicar queries con listNearbyNetworkChips).
    */
-  async listNearbyNetworkChipsByGooglePlaceIds(
+  async getNearbyNetworkSignalsForGooglePlaces(
     viewerId: string,
     googlePlaceIds: string[],
-  ): Promise<Map<string, string[]>> {
-    const result = new Map<string, string[]>();
+  ): Promise<{
+    chips: Map<string, string[]>;
+    boosts: Map<string, number>;
+  }> {
+    const chipsResult = new Map<string, string[]>();
+    const boostsResult = new Map<string, number>();
     const uniqueIds = Array.from(
       new Set(googlePlaceIds.filter((id) => Boolean(id && id.trim()))),
     );
     for (const id of uniqueIds) {
-      result.set(id, []);
+      chipsResult.set(id, []);
+      boostsResult.set(id, 0);
     }
     if (uniqueIds.length === 0) {
-      return result;
+      return { chips: chipsResult, boosts: boostsResult };
     }
 
     await this.ensureUserSettingsForAllUsers();
 
     const followingIds = await this.listFollowingIds(viewerId);
     if (followingIds.length === 0) {
-      return result;
+      return { chips: chipsResult, boosts: boostsResult };
     }
 
     const followingSet = new Set(followingIds);
@@ -1338,7 +1343,7 @@ export class SocialRepository {
     });
 
     if (placeRows.length === 0) {
-      return result;
+      return { chips: chipsResult, boosts: boostsResult };
     }
 
     const fecaIds = placeRows.map((row) => row.id);
@@ -1418,6 +1423,7 @@ export class SocialRepository {
       type Signal = { userId: string; score: number; chip: string };
       const signals: Signal[] = [];
 
+      let boost = 0;
       for (const visit of userVisitMap.values()) {
         const source = {
           rating: visit.rating,
@@ -1429,6 +1435,15 @@ export class SocialRepository {
           score: scoreNearbyVisitSignal(source),
           chip: formatNearbyVisitChip(source),
         });
+        if (visit.wouldReturn === "yes") {
+          boost += 26;
+        } else if (visit.wouldReturn === "maybe" && visit.rating >= 4) {
+          boost += 16;
+        } else if (visit.rating >= 4) {
+          boost += 11;
+        } else {
+          boost += 7;
+        }
       }
 
       const visitedUserIds = new Set(userVisitMap.keys());
@@ -1445,7 +1460,10 @@ export class SocialRepository {
           score: 26,
           chip: `A ${name} le gustaría ir`,
         });
+        boost += 14;
       }
+
+      boostsResult.set(googleId, Math.min(56, boost));
 
       signals.sort((a, b) => b.score - a.score);
 
@@ -1462,10 +1480,22 @@ export class SocialRepository {
         chips.push(s.chip);
       }
 
-      result.set(googleId, chips);
+      chipsResult.set(googleId, chips);
     }
 
-    return result;
+    return { chips: chipsResult, boosts: boostsResult };
+  }
+
+  /** @deprecated Preferir `getNearbyNetworkSignalsForGooglePlaces` para evitar doble query. */
+  async listNearbyNetworkChipsByGooglePlaceIds(
+    viewerId: string,
+    googlePlaceIds: string[],
+  ): Promise<Map<string, string[]>> {
+    const { chips } = await this.getNearbyNetworkSignalsForGooglePlaces(
+      viewerId,
+      googlePlaceIds,
+    );
+    return chips;
   }
 
   async getPlaceSocialContext(viewerId: string, placeId: string) {

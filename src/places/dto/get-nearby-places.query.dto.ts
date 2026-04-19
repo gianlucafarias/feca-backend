@@ -26,6 +26,15 @@ export class GetNearbyPlacesQueryDto {
   @IsIn(["home_city", "home_network"])
   variant?: "home_city" | "home_network";
 
+  /**
+   * Opcional: el cliente manda p. ej. `Date.now()` al hacer pull-to-refresh para
+   * reordenar el mismo pool de candidatos sin invalidar la caché de Google.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  rotate?: number;
+
   @Type(() => Number)
   @IsNumber()
   @Min(1)

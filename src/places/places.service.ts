@@ -24,6 +24,7 @@ import { SocialRepository } from "../infrastructure/repositories/social.reposito
 import { rankCandidatesWithRotation } from "../lib/dynamic-ranking";
 import { distanceInMeters } from "../lib/geo";
 import { buildNearbyOpeningChip } from "../lib/nearby-opening-chip";
+import { utcWeekBucketId } from "../lib/ranking-time-seed";
 import { scoreOutingAgainstIntent } from "../lib/outing-preferences";
 import { scoreTasteAgainstPlace } from "../lib/taste-place-score";
 import type { AutocompleteItem, PlaceRecord } from "../types";
@@ -332,9 +333,6 @@ export class PlacesService {
       return [];
     }
 
-    const present = (rows: GooglePlaceSummary[]) =>
-      this.presentNearbyPlaces(userId, rows);
-
     const resolved: NearbyQueryResolved = {
       ...input,
       lat: coords.lat,
@@ -358,18 +356,30 @@ export class PlacesService {
     const cacheKey = this.buildNearbyCacheKey(resolved, userId);
     const query = resolved.query?.trim();
     const candidateLimit = query ? resolved.limit : Math.min(resolved.limit * 3, 30);
+
+    const finalizeNearby = async (candidates: GooglePlaceSummary[]) => {
+      if (candidates.length === 0) {
+        return [];
+      }
+      const overlay = await this.socialRepository.getNearbyNetworkSignalsForGooglePlaces(
+        userId,
+        candidates.map((p) => p.googlePlaceId),
+      );
+      const ranked = query
+        ? candidates.slice(0, resolved.limit)
+        : rankNearbyPlaceResults(
+            userId,
+            resolved,
+            candidates,
+            signals.tastePreferenceIds,
+            overlay.boosts,
+          );
+      return this.presentNearbyPlaces(userId, ranked, overlay.chips);
+    };
+
     const cached = await this.cacheManager.get<GooglePlaceSummary[]>(cacheKey);
     if (cached) {
-      return present(
-        query
-          ? cached.slice(0, resolved.limit)
-          : rankNearbyPlaceResults(
-              userId,
-              resolved,
-              cached,
-              signals.tastePreferenceIds,
-            ),
-      );
+      return finalizeNearby(cached);
     }
 
     if (this.google.isEnabled) {
@@ -403,16 +413,7 @@ export class PlacesService {
           Math.min(this.config.cacheTtlMs, 120000),
         );
 
-        return present(
-          query
-            ? sanitized.slice(0, resolved.limit)
-            : rankNearbyPlaceResults(
-                userId,
-                resolved,
-                sanitized,
-                signals.tastePreferenceIds,
-              ),
-        );
+        return finalizeNearby(sanitized);
       } catch (error) {
         this.logger.error("Places nearby failed", error);
       }
@@ -421,17 +422,7 @@ export class PlacesService {
     return this.placesRepository
       .listNearbyPlaces(resolved.lat, resolved.lng, undefined, candidateLimit)
       .then((places) => places.map((place) => mapStoredPlaceToNearby(place, query)))
-      .then((places) =>
-        query
-          ? places.slice(0, resolved.limit)
-          : rankNearbyPlaceResults(
-              userId,
-              resolved,
-              places,
-              signals.tastePreferenceIds,
-            ),
-      )
-      .then((rows) => present(rows));
+      .then((rows) => finalizeNearby(rows));
   }
 
   async exploreContext(userId: string, input: ExploreContextQueryDto) {
@@ -499,6 +490,7 @@ export class PlacesService {
         resolved.lng,
         "all",
         undefined,
+        undefined,
       ),
         topWindow: Math.max(resolved.limit * 4, 20),
       },
@@ -514,16 +506,18 @@ export class PlacesService {
   private async presentNearbyPlaces(
     viewerId: string,
     places: GooglePlaceSummary[],
+    preloadedChips?: Map<string, string[]>,
   ): Promise<NearbyPlaceView[]> {
     if (places.length === 0) {
       return [];
     }
 
     const socialMap =
-      await this.socialRepository.listNearbyNetworkChipsByGooglePlaceIds(
+      preloadedChips ??
+      (await this.socialRepository.listNearbyNetworkChipsByGooglePlaceIds(
         viewerId,
         places.map((p) => p.googlePlaceId),
-      );
+      ));
 
     return places.map((place) => {
       const socialChips = socialMap.get(place.googlePlaceId) ?? [];
@@ -644,18 +638,23 @@ function rankNearbyPlaceResults(
   input: NearbyQueryResolved,
   places: GooglePlaceSummary[],
   tastePreferenceIds: string[],
+  networkBoostByGoogleId?: Map<string, number>,
 ) {
   return rankCandidatesWithRotation(
     places.map((place, index) => ({
       baseScore:
         buildNearbyPlaceScore(input, place, index) +
-        scoreTasteAgainstPlace(tastePreferenceIds, place.types ?? [], "solo"),
+        scoreTasteAgainstPlace(tastePreferenceIds, place.types ?? [], "solo") +
+        (input.variant === "home_network"
+          ? Math.min(56, networkBoostByGoogleId?.get(place.googlePlaceId) ?? 0)
+          : 0),
       id: place.googlePlaceId,
       item: place,
     })),
     {
-      jitterRatio: 0.06,
-      maxJitter: 8,
+      bucketHours: 1,
+      jitterRatio: 0.14,
+      maxJitter: 18,
       seed: buildPlacesRankingSeed(
         userId,
         "nearby",
@@ -663,6 +662,7 @@ function rankNearbyPlaceResults(
         input.lng,
         input.type ?? "all",
         input.variant,
+        input.rotate,
       ),
       topWindow: Math.max(input.limit * 4, 20),
     },
@@ -829,9 +829,15 @@ function buildPlacesRankingSeed(
   lng: number,
   type: string,
   variant?: string,
+  rotate?: number,
 ) {
   const v = variant?.trim() ? variant : "";
-  return `${userId}:${scope}:${type}:${v}:${lat.toFixed(2)}:${lng.toFixed(2)}`;
+  const week = utcWeekBucketId(new Date());
+  const r =
+    rotate != null && Number.isFinite(rotate) && rotate > 0
+      ? String(Math.floor(rotate))
+      : "";
+  return `${userId}:${scope}:${type}:${v}:${week}:${lat.toFixed(2)}:${lng.toFixed(2)}:${r}`;
 }
 
 function exploreReasonLine(intent: ExploreIntent, place: GooglePlaceSummary) {
