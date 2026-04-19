@@ -157,22 +157,39 @@ export class AuthRepository {
     userId: string,
     input: UpdateUserProfileInput & { cityId?: string },
   ) {
+    const data: Prisma.UserUncheckedUpdateInput = {};
+
+    if (input.bio !== undefined) {
+      data.bio = input.bio;
+    }
+    if (input.username !== undefined) {
+      data.username = input.username;
+    }
+    if (input.displayName !== undefined) {
+      data.displayName = input.displayName;
+    }
+    if (input.city !== undefined) {
+      data.city = input.city;
+    }
+    if (input.cityId !== undefined) {
+      data.cityId = input.cityId;
+    }
+    if (input.lat !== undefined) {
+      data.lat = input.lat;
+    }
+    if (input.lng !== undefined) {
+      data.lng = input.lng;
+    }
+    if (input.outingPreferences !== undefined) {
+      data.outingPreferences =
+        input.outingPreferences === null
+          ? Prisma.DbNull
+          : (input.outingPreferences as Prisma.InputJsonValue);
+    }
+
     return this.prisma.user.update({
       where: { id: userId },
-      data: {
-        ...(input.bio !== undefined ? { bio: input.bio } : {}),
-        ...(input.username !== undefined ? { username: input.username } : {}),
-        ...(input.displayName !== undefined
-          ? { displayName: input.displayName }
-          : {}),
-        ...(input.city !== undefined ? { city: input.city } : {}),
-        ...(input.cityId !== undefined ? { cityId: input.cityId } : {}),
-        ...(input.lat !== undefined ? { lat: input.lat } : {}),
-        ...(input.lng !== undefined ? { lng: input.lng } : {}),
-        ...(input.outingPreferences !== undefined
-          ? { outingPreferences: input.outingPreferences }
-          : {}),
-      },
+      data,
       include: {
         cityRef: true,
       },
