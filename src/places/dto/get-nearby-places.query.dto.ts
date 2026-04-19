@@ -21,6 +21,11 @@ export class GetNearbyPlacesQueryDto {
   @IsIn(["cafe", "restaurant"])
   type?: "cafe" | "restaurant";
 
+  /** Contexto del cliente (p. ej. home) para variar ranking/caché sin cambiar coords. */
+  @IsOptional()
+  @IsIn(["home_city", "home_network"])
+  variant?: "home_city" | "home_network";
+
   @Type(() => Number)
   @IsNumber()
   @Min(1)

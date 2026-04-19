@@ -482,13 +482,14 @@ export class PlacesService {
       {
         jitterRatio: 0.08,
         maxJitter: 9,
-        seed: buildPlacesRankingSeed(
-          userId,
-          `explore:${resolved.intent}`,
-          resolved.lat,
-          resolved.lng,
-          "all",
-        ),
+      seed: buildPlacesRankingSeed(
+        userId,
+        `explore:${resolved.intent}`,
+        resolved.lat,
+        resolved.lng,
+        "all",
+        undefined,
+      ),
         topWindow: Math.max(resolved.limit * 4, 20),
       },
     )
@@ -520,7 +521,8 @@ export class PlacesService {
   }
 
   private buildNearbyCacheKey(input: NearbyQueryResolved, userId: string) {
-    return `places:nearby:${userId}:${input.query?.trim().toLowerCase() ?? ""}:${input.type ?? "all"}:${input.lat.toFixed(3)}:${input.lng.toFixed(3)}:${input.limit}`;
+    const variant = input.variant ?? "none";
+    return `places:nearby:${userId}:${variant}:${input.query?.trim().toLowerCase() ?? ""}:${input.type ?? "all"}:${input.lat.toFixed(3)}:${input.lng.toFixed(3)}:${input.limit}`;
   }
 
   private async clearPlacesCache() {
@@ -604,6 +606,7 @@ function rankNearbyPlaceResults(
         input.lat,
         input.lng,
         input.type ?? "all",
+        input.variant,
       ),
       topWindow: Math.max(input.limit * 4, 20),
     },
@@ -765,8 +768,10 @@ function buildPlacesRankingSeed(
   lat: number,
   lng: number,
   type: string,
+  variant?: string,
 ) {
-  return `${userId}:${scope}:${type}:${lat.toFixed(2)}:${lng.toFixed(2)}`;
+  const v = variant?.trim() ? variant : "";
+  return `${userId}:${scope}:${type}:${v}:${lat.toFixed(2)}:${lng.toFixed(2)}`;
 }
 
 function exploreReasonLine(intent: ExploreIntent, place: GooglePlaceSummary) {

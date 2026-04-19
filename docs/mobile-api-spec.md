@@ -312,6 +312,7 @@ Query:
 
 - `query` opcional: texto libre para buscar por nombre o categoria
 - `type` opcional: `cafe` o `restaurant`
+- `variant` opcional: `home_city` o `home_network` (home FECA: misma zona pero distinta semilla de ranking y entrada de cache para que “Tu red” vs “Tu ciudad” no se vean identicos)
 - `lat` y `lng` opcionales: si faltan, el backend intenta usar la ubicacion guardada en el perfil
 - `limit` opcional: default `20`, max `20`
 
