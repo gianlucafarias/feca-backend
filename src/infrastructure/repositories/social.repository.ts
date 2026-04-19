@@ -16,6 +16,7 @@ import {
 
 import { rankCandidatesWithRotation } from "../../lib/dynamic-ranking";
 import { distanceInMeters } from "../../lib/geo";
+import { scoreTasteAgainstVisitTags } from "../../lib/taste-place-score";
 import { PrismaService } from "../../database/prisma.service";
 
 type PaginationInput = {
@@ -409,6 +410,21 @@ export class SocialRepository {
         tastePreferenceIds: true,
       },
     });
+  }
+
+  async getUserRecommendationSignals(userId: string) {
+    const row = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        outingPreferences: true,
+        tastePreferenceIds: true,
+      },
+    });
+
+    return {
+      outingPreferences: row?.outingPreferences ?? null,
+      tastePreferenceIds: row?.tastePreferenceIds ?? [],
+    };
   }
 
   async updateUserTastePreferenceIds(userId: string, tastePreferenceIds: string[]) {
@@ -1401,18 +1417,45 @@ export class SocialRepository {
       },
     };
 
-    const [visits, total] = await Promise.all([
+    const viewer = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { tastePreferenceIds: true },
+    });
+    const viewerTaste = viewer?.tastePreferenceIds ?? [];
+
+    const poolTake = Math.min(500, Math.max(100, (input.offset + input.limit) * 20));
+
+    const [pool, total] = await Promise.all([
       this.prisma.visit.findMany({
         where,
         include: visitInclude,
         orderBy: [{ visitedAt: "desc" }, { createdAt: "desc" }],
-        skip: input.offset,
-        take: input.limit,
+        skip: 0,
+        take: poolTake,
       }),
       this.prisma.visit.count({ where }),
     ]);
 
-    return { total, visits };
+    const ranked = rankCandidatesWithRotation(
+      pool.map((visit) => ({
+        baseScore: buildNetworkFeedScore(viewerTaste, visit),
+        id: visit.id,
+        item: visit,
+      })),
+      {
+        jitterRatio: 0.045,
+        maxJitter: 7,
+        seed: buildRankingSeed(userId, "feed-network", undefined, undefined),
+        topWindow: pool.length,
+      },
+    );
+
+    return {
+      total,
+      visits: ranked
+        .slice(input.offset, input.offset + input.limit)
+        .map((entry) => entry.item),
+    };
   }
 
   private async listNearbyFeed(userId: string, input: FeedInput) {
@@ -1427,6 +1470,9 @@ export class SocialRepository {
         visits: [],
       };
     }
+
+    const { tastePreferenceIds: viewerTaste } =
+      await this.getUserRecommendationSignals(userId);
 
     const nearby = rankCandidatesWithRotation(
       (await this.listVisibleRecentVisits(userId, 220))
@@ -1446,7 +1492,7 @@ export class SocialRepository {
           return distance <= 3500;
         })
         .map((visit) => ({
-          baseScore: buildNearbyScore(viewerLocation, visit),
+          baseScore: buildNearbyScore(viewerLocation, visit, viewerTaste),
           id: visit.id,
           item: visit,
         })),
@@ -1525,6 +1571,9 @@ export class SocialRepository {
         ? { lat: input.lat, lng: input.lng }
         : await this.getViewerLocation(userId);
 
+    const { tastePreferenceIds: viewerTaste } =
+      await this.getUserRecommendationSignals(userId);
+
     const ranked = rankCandidatesWithRotation(
       (await this.listVisibleRecentVisits(userId, 220))
         .filter((visit) => {
@@ -1549,7 +1598,7 @@ export class SocialRepository {
           );
         })
         .map((visit) => ({
-          baseScore: buildNowScore(new Date(), visit),
+          baseScore: buildNowScore(new Date(), visit, viewerTaste),
           id: visit.id,
           item: visit,
         })),
@@ -1824,9 +1873,40 @@ function isVisitVisibleToViewer(
   return canViewContent(settings.activityVisibility, viewerFollowsTarget);
 }
 
+function buildNetworkFeedScore(
+  viewerTasteIds: string[],
+  visit: VisitWithRelations,
+) {
+  let score = visit.rating * 4;
+
+  if (visit.wouldReturn === "yes") {
+    score += 28;
+  } else if (visit.wouldReturn === "maybe") {
+    score += 12;
+  }
+
+  const authorTaste = visit.user.tastePreferenceIds ?? [];
+  const overlap = viewerTasteIds.filter((id) => authorTaste.includes(id)).length;
+  score += overlap * 12;
+  score += scoreTasteAgainstVisitTags(viewerTasteIds, visit.tags);
+
+  const days =
+    (Date.now() - visit.visitedAt.getTime()) / (1000 * 60 * 60 * 24);
+  if (days <= 7) {
+    score += 14;
+  } else if (days <= 21) {
+    score += 8;
+  } else if (days <= 45) {
+    score += 4;
+  }
+
+  return score;
+}
+
 function buildNearbyScore(
   viewerLocation: { lat: number; lng: number },
   visit: VisitWithRelations,
+  viewerTasteIds: string[],
 ) {
   const distance =
     typeof visit.place.lat === "number" && typeof visit.place.lng === "number"
@@ -1844,10 +1924,21 @@ function buildNearbyScore(
   const recencyPenalty =
     (Date.now() - visit.visitedAt.getTime()) / (1000 * 60 * 60 * 24 * 5);
 
-  return 200 - distance / 25 + ratingScore + returnScore - recencyPenalty;
+  return (
+    200 -
+    distance / 25 +
+    ratingScore +
+    returnScore -
+    recencyPenalty +
+    scoreTasteAgainstVisitTags(viewerTasteIds, visit.tags)
+  );
 }
 
-function buildNowScore(now: Date, visit: VisitWithRelations) {
+function buildNowScore(
+  now: Date,
+  visit: VisitWithRelations,
+  viewerTasteIds: string[],
+) {
   const hour = now.getHours();
   const isSunday = now.getDay() === 0;
   const tags = new Set(visit.tags);
@@ -1880,7 +1971,7 @@ function buildNowScore(now: Date, visit: VisitWithRelations) {
     score += 6;
   }
 
-  return score;
+  return score + scoreTasteAgainstVisitTags(viewerTasteIds, visit.tags);
 }
 
 function buildRankingSeed(

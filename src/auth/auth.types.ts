@@ -15,6 +15,8 @@ export type UpdateUserProfileInput = {
   lat?: number;
   lng?: number;
   username?: string;
+  /** JSON privado; `null` borra el valor guardado. */
+  outingPreferences?: Record<string, unknown> | null;
 };
 
 export type AccessTokenPayload = {
@@ -38,6 +40,7 @@ export type AuthSessionPayload = {
     lat?: number;
     lng?: number;
     username: string;
+    outingPreferences?: unknown;
   };
 };
 

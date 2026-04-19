@@ -134,10 +134,13 @@ Respuesta:
     "followersCount": 20,
     "followingCount": 54,
     "savedCount": 12,
-    "visitCount": 38
+    "visitCount": 38,
+    "outingPreferences": null
   }
 }
 ```
+
+Campo opcional `outingPreferences` (JSON privado, solo en la sesión del usuario): preferencias de salida para personalizar ranking en `GET /v1/places/nearby`, `GET /v1/explore/context` y el feed. No se expone en `GET /v1/users/:id`.
 
 ### `PATCH /v1/me`
 
@@ -153,6 +156,8 @@ Parcial para perfil y contexto de ciudad. Si se envía ubicación, debe enviarse
   "lng": -58.3816
 }
 ```
+
+También se acepta `outingPreferences` (objeto con `schemaVersion: 1` y campos opcionales `typicalOutingSlots`, `typicalCompany`, `placePriorities`) o `null` para borrar.
 
 ### `GET /v1/me/settings/social`
 
@@ -554,7 +559,7 @@ Respuesta:
 - `GET /v1/users/:id/visits`
 - `GET /v1/feed`
 
-Orden de visitas: `visitedAt desc`, luego `createdAt desc`.
+Orden: en `mode=city` las visitas públicas de la ciudad van por `visitedAt desc`. En `mode=network` el backend rankea un pool reciente (volvería, rating, solape de taste con el viewer, recencia) con ligera rotación estable. En `mode=nearby` y `mode=now` aplica ranking heurístico + taste del viewer.
 
 ## Diarios / guías
 

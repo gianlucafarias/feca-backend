@@ -2,6 +2,7 @@ import { Transform } from "class-transformer";
 import {
   IsIn,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   Max,
@@ -9,6 +10,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
 } from "class-validator";
 
 function normalizeOptionalText(value: unknown) {
@@ -69,4 +71,9 @@ export class UpdateMeDto {
   @IsOptional()
   @IsIn(["everyone", "from_following_only"])
   groupInvitePolicy?: "everyone" | "from_following_only";
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined)
+  @IsObject()
+  outingPreferences?: Record<string, unknown> | null;
 }

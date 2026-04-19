@@ -169,6 +169,9 @@ export class AuthRepository {
         ...(input.cityId !== undefined ? { cityId: input.cityId } : {}),
         ...(input.lat !== undefined ? { lat: input.lat } : {}),
         ...(input.lng !== undefined ? { lng: input.lng } : {}),
+        ...(input.outingPreferences !== undefined
+          ? { outingPreferences: input.outingPreferences }
+          : {}),
       },
       include: {
         cityRef: true,

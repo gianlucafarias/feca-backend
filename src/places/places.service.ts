@@ -22,6 +22,8 @@ import { PlacesRepository } from "../infrastructure/repositories/places.reposito
 import { SocialRepository } from "../infrastructure/repositories/social.repository";
 import { rankCandidatesWithRotation } from "../lib/dynamic-ranking";
 import { distanceInMeters } from "../lib/geo";
+import { scoreOutingAgainstIntent } from "../lib/outing-preferences";
+import { scoreTasteAgainstPlace } from "../lib/taste-place-score";
 import type { AutocompleteItem, PlaceRecord } from "../types";
 import { AutocompleteCitiesQueryDto } from "./dto/autocomplete-cities.query.dto";
 import { ExploreContextQueryDto } from "./dto/explore-context.query.dto";
@@ -347,14 +349,20 @@ export class PlacesService {
       );
     }
 
-    const cacheKey = this.buildNearbyCacheKey(resolved);
+    const signals = await this.socialRepository.getUserRecommendationSignals(userId);
+    const cacheKey = this.buildNearbyCacheKey(resolved, userId);
     const query = resolved.query?.trim();
     const candidateLimit = query ? resolved.limit : Math.min(resolved.limit * 3, 30);
     const cached = await this.cacheManager.get<GooglePlaceSummary[]>(cacheKey);
     if (cached) {
       return query
         ? cached.slice(0, resolved.limit)
-        : rankNearbyPlaceResults(userId, resolved, cached);
+        : rankNearbyPlaceResults(
+            userId,
+            resolved,
+            cached,
+            signals.tastePreferenceIds,
+          );
     }
 
     if (this.google.isEnabled) {
@@ -390,7 +398,12 @@ export class PlacesService {
 
         return query
           ? sanitized.slice(0, resolved.limit)
-          : rankNearbyPlaceResults(userId, resolved, sanitized);
+          : rankNearbyPlaceResults(
+              userId,
+              resolved,
+              sanitized,
+              signals.tastePreferenceIds,
+            );
       } catch (error) {
         this.logger.error("Places nearby failed", error);
       }
@@ -402,7 +415,12 @@ export class PlacesService {
       .then((places) =>
         query
           ? places.slice(0, resolved.limit)
-          : rankNearbyPlaceResults(userId, resolved, places),
+          : rankNearbyPlaceResults(
+              userId,
+              resolved,
+              places,
+              signals.tastePreferenceIds,
+            ),
       );
   }
 
@@ -422,6 +440,8 @@ export class PlacesService {
       lng: coords.lng,
     };
 
+    const signals = await this.socialRepository.getUserRecommendationSignals(userId);
+
     const nearby = await this.placesRepository.listNearbyPlaces(
       resolved.lat,
       resolved.lng,
@@ -437,8 +457,21 @@ export class PlacesService {
             ? distanceInMeters(resolved.lat, resolved.lng, place.lat, place.lng)
             : 5000;
 
+        const tasteBoost = scoreTasteAgainstPlace(
+          signals.tastePreferenceIds,
+          summary.types ?? [],
+          resolved.intent,
+        );
+        const outingBoost = scoreOutingAgainstIntent(
+          resolved.intent,
+          signals.outingPreferences,
+        );
+
         return {
-          baseScore: scoreExploreIntent(resolved.intent, summary, distanceMeters),
+          baseScore:
+            scoreExploreIntent(resolved.intent, summary, distanceMeters) +
+            tasteBoost +
+            outingBoost,
           id: summary.googlePlaceId,
           item: {
             ...summary,
@@ -486,8 +519,8 @@ export class PlacesService {
     return `places:autocomplete:${input.q.trim().toLowerCase()}:${input.city?.trim().toLowerCase() ?? ""}:${lat}:${lng}:${input.limit}`;
   }
 
-  private buildNearbyCacheKey(input: NearbyQueryResolved) {
-    return `places:nearby:${input.query?.trim().toLowerCase() ?? ""}:${input.type ?? "all"}:${input.lat.toFixed(3)}:${input.lng.toFixed(3)}:${input.limit}`;
+  private buildNearbyCacheKey(input: NearbyQueryResolved, userId: string) {
+    return `places:nearby:${userId}:${input.query?.trim().toLowerCase() ?? ""}:${input.type ?? "all"}:${input.lat.toFixed(3)}:${input.lng.toFixed(3)}:${input.limit}`;
   }
 
   private async clearPlacesCache() {
@@ -552,10 +585,13 @@ function rankNearbyPlaceResults(
   userId: string,
   input: NearbyQueryResolved,
   places: GooglePlaceSummary[],
+  tastePreferenceIds: string[],
 ) {
   return rankCandidatesWithRotation(
     places.map((place, index) => ({
-      baseScore: buildNearbyPlaceScore(input, place, index),
+      baseScore:
+        buildNearbyPlaceScore(input, place, index) +
+        scoreTasteAgainstPlace(tastePreferenceIds, place.types ?? [], "solo"),
       id: place.googlePlaceId,
       item: place,
     })),

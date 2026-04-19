@@ -21,6 +21,7 @@ import {
   mergeSerializedUserStats,
   serializeAuthenticatedUser,
 } from "../lib/api-presenters";
+import { sanitizeOutingPreferences } from "../lib/outing-preferences";
 import { AuthRepository } from "./auth.repository";
 import type {
   AccessTokenPayload,
@@ -125,13 +126,31 @@ export class AuthService {
         : undefined;
 
     try {
-      const { groupInvitePolicy: _groupInvitePolicy, ...profileInput } = input;
+      const {
+        groupInvitePolicy: _groupInvitePolicy,
+        outingPreferences,
+        ...profileInput
+      } = input;
+
+      let outingForDb: ReturnType<typeof sanitizeOutingPreferences> | null | undefined;
+      if (outingPreferences !== undefined) {
+        if (outingPreferences === null) {
+          outingForDb = null;
+        } else {
+          try {
+            outingForDb = sanitizeOutingPreferences(outingPreferences);
+          } catch {
+            throw new BadRequestException("Formato invalido en outingPreferences");
+          }
+        }
+      }
 
       const updatedUser = await this.authRepository.updateUserProfile(
         userId,
         {
           ...profileInput,
           cityId,
+          ...(outingForDb !== undefined ? { outingPreferences: outingForDb } : {}),
         },
       );
 

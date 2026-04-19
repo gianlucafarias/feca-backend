@@ -134,6 +134,8 @@ model User {
   lng                Float?
   tone               DisplayTone      @default(editorial)
   tastePreferenceIds String[]         @default([])
+  /** Preferencias de salida / ranking (JSON privado; no exponer en perfiles públicos). */
+  outingPreferences  Json?
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
   cityRef            City?            @relation("UserCity", fields: [cityId], references: [id], onDelete: SetNull)

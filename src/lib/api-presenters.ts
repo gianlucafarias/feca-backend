@@ -141,6 +141,7 @@ export function serializeAuthenticatedUser(
     | "id"
     | "lat"
     | "lng"
+    | "outingPreferences"
     | "username"
   > & {
     cityRef?: {
@@ -158,6 +159,7 @@ export function serializeAuthenticatedUser(
     id: user.id,
     lat: user.lat ?? undefined,
     lng: user.lng ?? undefined,
+    outingPreferences: user.outingPreferences ?? null,
     username: user.username,
   };
 }
