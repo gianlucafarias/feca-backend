@@ -18,7 +18,11 @@ import {
 import { rankCandidatesWithRotation } from "../../lib/dynamic-ranking";
 import { distanceInMeters } from "../../lib/geo";
 import {
+  formatFriendSnippetFromSave,
+  formatFriendSnippetFromVisit,
+  formatNearbySocialChipLine,
   formatNearbyVisitChip,
+  type NearbyFriendSocialRow,
   scoreNearbyVisitSignal,
 } from "../../lib/nearby-network-chips";
 import { scoreTasteAgainstVisitTags } from "../../lib/taste-place-score";
@@ -1334,25 +1338,28 @@ export class SocialRepository {
   ): Promise<{
     chips: Map<string, string[]>;
     boosts: Map<string, number>;
+    friendRows: Map<string, NearbyFriendSocialRow[]>;
   }> {
     const chipsResult = new Map<string, string[]>();
     const boostsResult = new Map<string, number>();
+    const friendRowsResult = new Map<string, NearbyFriendSocialRow[]>();
     const uniqueIds = Array.from(
       new Set(googlePlaceIds.filter((id) => Boolean(id && id.trim()))),
     );
     for (const id of uniqueIds) {
       chipsResult.set(id, []);
       boostsResult.set(id, 0);
+      friendRowsResult.set(id, []);
     }
     if (uniqueIds.length === 0) {
-      return { chips: chipsResult, boosts: boostsResult };
+      return { chips: chipsResult, boosts: boostsResult, friendRows: friendRowsResult };
     }
 
     await this.ensureUserSettingsForAllUsers();
 
     const followingIds = await this.listFollowingIds(viewerId);
     if (followingIds.length === 0) {
-      return { chips: chipsResult, boosts: boostsResult };
+      return { chips: chipsResult, boosts: boostsResult, friendRows: friendRowsResult };
     }
 
     const followingSet = new Set(followingIds);
@@ -1366,7 +1373,7 @@ export class SocialRepository {
     });
 
     if (placeRows.length === 0) {
-      return { chips: chipsResult, boosts: boostsResult };
+      return { chips: chipsResult, boosts: boostsResult, friendRows: friendRowsResult };
     }
 
     const fecaIds = placeRows.map((row) => row.id);
@@ -1428,6 +1435,7 @@ export class SocialRepository {
           rating: v.rating,
           wouldReturn: v.wouldReturn,
           displayName: v.user.displayName || v.user.username,
+          username: v.user.username,
         };
         if (!prev) {
           userVisitMap.set(v.userId, v);
@@ -1437,13 +1445,19 @@ export class SocialRepository {
           rating: prev.rating,
           wouldReturn: prev.wouldReturn,
           displayName: prev.user.displayName || prev.user.username,
+          username: prev.user.username,
         };
         if (scoreNearbyVisitSignal(nextSource) > scoreNearbyVisitSignal(prevSource)) {
           userVisitMap.set(v.userId, v);
         }
       }
 
-      type Signal = { userId: string; score: number; chip: string };
+      type Signal = {
+        userId: string;
+        score: number;
+        chip: string;
+        friendRow: NearbyFriendSocialRow;
+      };
       const signals: Signal[] = [];
 
       let boost = 0;
@@ -1452,11 +1466,18 @@ export class SocialRepository {
           rating: visit.rating,
           wouldReturn: visit.wouldReturn,
           displayName: visit.user.displayName || visit.user.username,
+          username: visit.user.username,
         };
+        const snippet = formatFriendSnippetFromVisit(source);
         signals.push({
           userId: visit.userId,
           score: scoreNearbyVisitSignal(source),
           chip: formatNearbyVisitChip(source),
+          friendRow: {
+            username: visit.user.username,
+            avatarUrl: visit.user.avatarUrl ?? null,
+            snippet,
+          },
         });
         if (visit.wouldReturn === "yes") {
           boost += 26;
@@ -1477,11 +1498,16 @@ export class SocialRepository {
         if (visitedUserIds.has(save.userId)) {
           continue;
         }
-        const name = save.user.displayName || save.user.username;
+        const saveSnippet = formatFriendSnippetFromSave();
         signals.push({
           userId: save.userId,
           score: 26,
-          chip: `A ${name} le gustaría ir`,
+          chip: formatNearbySocialChipLine(save.user.username, saveSnippet),
+          friendRow: {
+            username: save.user.username,
+            avatarUrl: save.user.avatarUrl ?? null,
+            snippet: saveSnippet,
+          },
         });
         boost += 14;
       }
@@ -1491,6 +1517,7 @@ export class SocialRepository {
       signals.sort((a, b) => b.score - a.score);
 
       const chips: string[] = [];
+      const friendRows: NearbyFriendSocialRow[] = [];
       const usedUsers = new Set<string>();
       for (const s of signals) {
         if (chips.length >= 2) {
@@ -1501,24 +1528,29 @@ export class SocialRepository {
         }
         usedUsers.add(s.userId);
         chips.push(s.chip);
+        friendRows.push(s.friendRow);
       }
 
       chipsResult.set(googleId, chips);
+      friendRowsResult.set(googleId, friendRows);
     }
 
-    return { chips: chipsResult, boosts: boostsResult };
+    return { chips: chipsResult, boosts: boostsResult, friendRows: friendRowsResult };
   }
 
   /** @deprecated Preferir `getNearbyNetworkSignalsForGooglePlaces` para evitar doble query. */
   async listNearbyNetworkChipsByGooglePlaceIds(
     viewerId: string,
     googlePlaceIds: string[],
-  ): Promise<Map<string, string[]>> {
-    const { chips } = await this.getNearbyNetworkSignalsForGooglePlaces(
+  ): Promise<{
+    chips: Map<string, string[]>;
+    friendRows: Map<string, NearbyFriendSocialRow[]>;
+  }> {
+    const { chips, friendRows } = await this.getNearbyNetworkSignalsForGooglePlaces(
       viewerId,
       googlePlaceIds,
     );
-    return chips;
+    return { chips, friendRows };
   }
 
   async getPlaceSocialContext(viewerId: string, placeId: string) {

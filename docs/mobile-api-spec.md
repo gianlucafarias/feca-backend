@@ -322,6 +322,12 @@ Comportamiento:
 - si no hay `query`, devuelve lugares cercanos rankeados alrededor de la ubicacion resuelta
 - si faltan `lat` / `lng` y el usuario no tiene coordenadas guardadas, responde `{ "places": [] }`
 
+Campos opcionales por lugar (red / gente que seguis):
+
+- `openingChip`: texto corto de horario (ej. abierto / abre a las …)
+- `socialChips`: hasta 2 strings en formato `@usuario snippet` (compat con clientes que solo parsean texto)
+- `friendSocialRows`: preferido para UI editorial; cada item tiene `username`, `snippet` y opcional `avatarUrl`
+
 ```json
 {
   "places": [
@@ -336,7 +342,12 @@ Comportamiento:
       "types": ["cafe", "food"],
       "primaryType": "cafe",
       "photoUrl": "https://...",
-      "openNow": true
+      "openNow": true,
+      "openingChip": "Abierto ahora",
+      "socialChips": ["@ana volvería a ir"],
+      "friendSocialRows": [
+        { "username": "ana", "snippet": "volvería a ir", "avatarUrl": "https://..." }
+      ]
     }
   ]
 }

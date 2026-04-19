@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 
 import { AppConfigService } from "../../config/app-config.service";
+import type { NearbyFriendSocialRow } from "../../lib/nearby-network-chips";
 
 const GOOGLE_BASE_URL = "https://places.googleapis.com/v1";
 const GOOGLE_GEOCODING_URL = "https://maps.googleapis.com/maps/api/geocode/json";
@@ -115,10 +116,15 @@ export type GooglePlaceSummary = {
   openingWeekdayLines?: string[];
 };
 
+export type { NearbyFriendSocialRow };
+
 /** Respuesta pública de listados cercanos (sin líneas crudas de Google). */
 export type NearbyPlaceView = Omit<GooglePlaceSummary, "openingWeekdayLines"> & {
   openingChip?: string;
+  /** Líneas `@usuario snippet` (compat + parseo en cliente). */
   socialChips?: string[];
+  /** Preferido por el cliente para avatar + @handle sin parsear texto. */
+  friendSocialRows?: NearbyFriendSocialRow[];
 };
 
 export type FecaPlaceReview = {

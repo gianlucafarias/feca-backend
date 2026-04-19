@@ -23,6 +23,7 @@ import { PlacesRepository } from "../infrastructure/repositories/places.reposito
 import { SocialRepository } from "../infrastructure/repositories/social.repository";
 import { rankCandidatesWithRotation } from "../lib/dynamic-ranking";
 import { distanceInMeters } from "../lib/geo";
+import type { NearbyFriendSocialRow } from "../lib/nearby-network-chips";
 import { buildNearbyOpeningChip } from "../lib/nearby-opening-chip";
 import { utcWeekBucketId } from "../lib/ranking-time-seed";
 import { scoreOutingAgainstIntent } from "../lib/outing-preferences";
@@ -391,7 +392,10 @@ export class PlacesService {
             signals.tastePreferenceIds,
             overlay.boosts,
           );
-      return this.presentNearbyPlaces(userId, ranked, overlay.chips);
+      return this.presentNearbyPlaces(userId, ranked, {
+        chips: overlay.chips,
+        friendRows: overlay.friendRows,
+      });
     };
 
     if (query) {
@@ -552,21 +556,27 @@ export class PlacesService {
   private async presentNearbyPlaces(
     viewerId: string,
     places: GooglePlaceSummary[],
-    preloadedChips?: Map<string, string[]>,
+    preloaded?: {
+      chips: Map<string, string[]>;
+      friendRows: Map<string, NearbyFriendSocialRow[]>;
+    },
   ): Promise<NearbyPlaceView[]> {
     if (places.length === 0) {
       return [];
     }
 
-    const socialMap =
-      preloadedChips ??
+    const bundle =
+      preloaded ??
       (await this.socialRepository.listNearbyNetworkChipsByGooglePlaceIds(
         viewerId,
         places.map((p) => p.googlePlaceId),
       ));
+    const socialMap = bundle.chips;
+    const friendRowsMap = bundle.friendRows;
 
     return places.map((place) => {
       const socialChips = socialMap.get(place.googlePlaceId) ?? [];
+      const friendSocialRows = friendRowsMap.get(place.googlePlaceId) ?? [];
       const openingChip = buildNearbyOpeningChip(
         place.openNow,
         place.openingWeekdayLines,
@@ -578,6 +588,9 @@ export class PlacesService {
       }
       if (socialChips.length > 0) {
         view.socialChips = socialChips;
+      }
+      if (friendSocialRows.length > 0) {
+        view.friendSocialRows = friendSocialRows;
       }
       return view;
     });
