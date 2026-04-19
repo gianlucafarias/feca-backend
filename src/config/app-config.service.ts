@@ -91,4 +91,25 @@ export class AppConfigService {
   get trustProxy() {
     return this.configService.get("TRUST_PROXY", { infer: true });
   }
+
+  /**
+   * Emails de administradores de producto (comparación case-insensitive).
+   * Vacío si `FECA_ADMIN_EMAILS` no está definido.
+   */
+  get fecaAdminEmailSet(): Set<string> {
+    const raw = this.configService.get("FECA_ADMIN_EMAILS", { infer: true });
+    if (!raw) {
+      return new Set();
+    }
+    return new Set(
+      raw
+        .split(",")
+        .map((e) => e.trim().toLowerCase())
+        .filter(Boolean),
+    );
+  }
+
+  isFecaAdminEmail(email: string): boolean {
+    return this.fecaAdminEmailSet.has(email.trim().toLowerCase());
+  }
 }

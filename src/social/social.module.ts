@@ -5,6 +5,7 @@ import { InfrastructureModule } from "../infrastructure/infrastructure.module";
 import { PlacesModule } from "../places/places.module";
 import { DiariesController } from "./diaries.controller";
 import { FeedController } from "./feed.controller";
+import { HomeController } from "./home.controller";
 import { GroupsController } from "./groups.controller";
 import { MeController } from "./me.controller";
 import { NotificationsService } from "./notifications.service";
@@ -19,6 +20,7 @@ import { UsersController } from "./users.controller";
     DiariesController,
     FeedController,
     GroupsController,
+    HomeController,
     MeController,
     PlaceSavesController,
     TasteController,

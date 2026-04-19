@@ -93,12 +93,19 @@ export class AuthService {
     return {
       user: {
         ...mergeSerializedUserStats(
-          serializeAuthenticatedUser(user),
+          serializeAuthenticatedUser(user, {
+            isAdmin: this.config.isFecaAdminEmail(user.email),
+          }),
           stats,
         ),
         groupInvitePolicy: mapGroupInvitePolicyToApi(socialSettings.groupInvitePolicy),
       },
     };
+  }
+
+  async setMyEditorFlag(userId: string, isEditor: boolean) {
+    await this.authRepository.updateUserIsEditor(userId, isEditor);
+    return this.getMe(userId);
   }
 
   async updateMe(userId: string, input: UpdateUserProfileInput) {
@@ -168,7 +175,9 @@ export class AuthService {
       return {
         user: {
           ...mergeSerializedUserStats(
-            serializeAuthenticatedUser(updatedUser),
+            serializeAuthenticatedUser(updatedUser, {
+              isAdmin: this.config.isFecaAdminEmail(updatedUser.email),
+            }),
             stats,
           ),
           groupInvitePolicy: mapGroupInvitePolicyToApi(socialSettings.groupInvitePolicy),
@@ -225,7 +234,9 @@ export class AuthService {
       accessTokenExpiresAt: accessTokenExpiresAt.toISOString(),
       refreshToken,
       refreshTokenExpiresAt: refreshTokenExpiresAt.toISOString(),
-      user: serializeAuthenticatedUser(hydratedUser),
+      user: serializeAuthenticatedUser(hydratedUser, {
+        isAdmin: this.config.isFecaAdminEmail(hydratedUser.email),
+      }),
     };
   }
 

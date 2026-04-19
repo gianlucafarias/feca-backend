@@ -196,6 +196,13 @@ export class AuthRepository {
     });
   }
 
+  updateUserIsEditor(userId: string, isEditor: boolean) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { isEditor },
+    });
+  }
+
   createSession(input: {
     expiresAt: Date;
     ipAddress?: string;

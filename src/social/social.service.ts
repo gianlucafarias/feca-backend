@@ -13,6 +13,7 @@ import {
   GuideVisibility,
   MemberProposalInteraction,
   PlaceProposalPolicy,
+  type Prisma,
 } from "@prisma/client";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { randomBytes } from "node:crypto";
@@ -47,6 +48,7 @@ import { JoinGroupDto } from "./dto/join-group.dto";
 import { NotificationsService } from "./notifications.service";
 import { SearchUsersQueryDto } from "./dto/search-users.query.dto";
 import { SearchDiariesQueryDto } from "./dto/search-diaries.query.dto";
+import { UpdateDiaryDto } from "./dto/update-diary.dto";
 import { UpdateGroupDto } from "./dto/update-group.dto";
 import { UpdateGroupEventRsvpDto } from "./dto/update-group-event-rsvp.dto";
 import { UpdateSocialSettingsDto } from "./dto/update-social-settings.dto";
@@ -922,6 +924,14 @@ export class SocialService {
     };
   }
 
+  async listHomeEditorGuides(limit: number) {
+    const { diaries, total } = await this.socialRepository.listHomeEditorGuides(limit);
+    return {
+      diaries: diaries.map(serializeDiary),
+      total,
+    };
+  }
+
   async getDiary(viewerId: string, diaryId: string) {
     const diary = await this.socialRepository.findDiaryById(diaryId);
     if (!diary) {
@@ -963,6 +973,70 @@ export class SocialService {
 
     return {
       diary: serializeDiary(updatedDiary),
+    };
+  }
+
+  async updateDiary(userId: string, diaryId: string, body: UpdateDiaryDto) {
+    const diary = await this.socialRepository.findDiaryById(diaryId);
+    if (!diary) {
+      throw new NotFoundException("Diary not found");
+    }
+
+    if (diary.createdById !== userId) {
+      throw new ForbiddenException("You cannot edit this diary");
+    }
+
+    const mergedVisibility =
+      body.visibility !== undefined ? body.visibility : diary.visibility;
+
+    const nextPublishedAt = resolveDiaryPublishedAtOnUpdate(diary, body);
+
+    const wasPublicLive =
+      diary.visibility === GuideVisibility.public && Boolean(diary.publishedAt);
+    const isPublicLive =
+      mergedVisibility === GuideVisibility.public && Boolean(nextPublishedAt);
+
+    const data: Prisma.DiaryUpdateInput = {};
+    if (body.name !== undefined) {
+      data.name = body.name.trim();
+    }
+    if (body.description !== undefined) {
+      data.description = body.description.trim() || null;
+    }
+    if (body.intro !== undefined) {
+      data.intro = body.intro.trim() || null;
+    }
+    if (body.editorialReason !== undefined) {
+      data.editorialReason = body.editorialReason.trim() || null;
+    }
+    if (body.coverImageUrl !== undefined) {
+      data.coverImageUrl = body.coverImageUrl.trim() || null;
+    }
+    if (body.visibility !== undefined) {
+      data.visibility = body.visibility;
+    }
+    data.publishedAt = nextPublishedAt;
+
+    const updated = await this.socialRepository.patchDiary(diaryId, data);
+
+    if (!wasPublicLive && isPublicLive) {
+      await this.notificationsService.publish({
+        actorId: userId,
+        entity: {
+          id: updated.id,
+          type: "diary",
+        },
+        payload: {
+          diaryId: updated.id,
+          diaryName: updated.name,
+        },
+        recipientIds: await this.socialRepository.listFollowerIds(userId),
+        type: "diary_published",
+      });
+    }
+
+    return {
+      diary: serializeDiary(updated),
     };
   }
 
@@ -1136,6 +1210,30 @@ function resolveDiaryPublishedAt(body: CreateDiaryDto) {
   }
 
   return undefined;
+}
+
+function resolveDiaryPublishedAtOnUpdate(
+  diary: { publishedAt: Date | null; visibility: GuideVisibility },
+  body: UpdateDiaryDto,
+): Date | null {
+  const nextVisibility =
+    body.visibility !== undefined
+      ? (body.visibility as GuideVisibility)
+      : diary.visibility;
+
+  if (nextVisibility === GuideVisibility.private) {
+    return null;
+  }
+
+  if (body.publishedAt) {
+    return new Date(body.publishedAt);
+  }
+
+  if (diary.publishedAt) {
+    return diary.publishedAt;
+  }
+
+  return new Date();
 }
 
 function canViewDiary(

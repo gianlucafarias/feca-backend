@@ -71,6 +71,8 @@ const envSchema = z
     RATE_LIMIT_TTL: z.coerce.number().int().positive().default(60000),
     RATE_LIMIT_LIMIT: z.coerce.number().int().positive().default(60),
     CORS_ALLOWED_ORIGINS: optionalStringSchema,
+    /** Lista separada por comas; emails que pueden otorgarse rol editor (preview). */
+    FECA_ADMIN_EMAILS: optionalStringSchema,
     TRUST_PROXY: booleanLikeSchema.default(false),
   })
   .superRefine((env, ctx) => {

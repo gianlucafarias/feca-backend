@@ -1225,6 +1225,29 @@ export class SocialRepository {
     });
   }
 
+  async listHomeEditorGuides(limit: number) {
+    const diaries = await this.prisma.diary.findMany({
+      where: {
+        createdBy: { isEditor: true },
+        publishedAt: { not: null },
+        visibility: GuideVisibility.public,
+      },
+      include: diaryInclude,
+      orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
+      take: limit,
+    });
+
+    return { diaries, total: diaries.length };
+  }
+
+  async patchDiary(diaryId: string, data: Prisma.DiaryUpdateInput) {
+    return this.prisma.diary.update({
+      where: { id: diaryId },
+      data,
+      include: diaryInclude,
+    });
+  }
+
   async searchPublicDiaries(input: PaginationInput & { q: string }) {
     const normalizedQuery = input.q.trim();
     const where: Prisma.DiaryWhereInput = {

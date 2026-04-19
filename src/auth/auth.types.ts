@@ -37,6 +37,8 @@ export type AuthSessionPayload = {
     displayName: string;
     email: string;
     id: string;
+    isAdmin?: boolean;
+    isEditor?: boolean;
     lat?: number;
     lng?: number;
     username: string;

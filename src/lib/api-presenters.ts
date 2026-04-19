@@ -139,6 +139,7 @@ export function serializeAuthenticatedUser(
     | "displayName"
     | "email"
     | "id"
+    | "isEditor"
     | "lat"
     | "lng"
     | "outingPreferences"
@@ -148,6 +149,7 @@ export function serializeAuthenticatedUser(
       googlePlaceId: string;
     } | null;
   },
+  options: { isAdmin: boolean },
 ) {
   return {
     avatarUrl: user.avatarUrl ?? undefined,
@@ -157,6 +159,8 @@ export function serializeAuthenticatedUser(
     displayName: user.displayName,
     email: user.email,
     id: user.id,
+    isAdmin: options.isAdmin,
+    isEditor: user.isEditor,
     lat: user.lat ?? undefined,
     lng: user.lng ?? undefined,
     outingPreferences: user.outingPreferences ?? null,

@@ -116,6 +116,7 @@ model City {
   updatedAt     DateTime @updatedAt
   users         User[]   @relation("UserCity")
   places        Place[]  @relation("PlaceCity")
+  featuredDiaries Diary[] @relation("DiaryFeaturedCity")
 
   @@index([name])
 }
@@ -154,8 +155,11 @@ model User {
   diaries            Diary[]          @relation("DiaryCreator")
   notifications      Notification[]   @relation("UserNotifications")
   notificationsSent  Notification[]   @relation("NotificationActor")
+  /** Curadores: guías públicas pueden destacarse en inicio (según reglas de producto). */
+  isEditor           Boolean          @default(false)
 
   @@index([cityId])
+  @@index([isEditor])
 }
 
 model AuthIdentity {
@@ -359,12 +363,16 @@ model Diary {
   coverImageUrl   String?
   visibility      GuideVisibility @default(private)
   publishedAt     DateTime?
+  /** Alcance futuro para carrusel por ciudad; null = sin filtro de ciudad en producto. */
+  featuredCityId  String?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
   createdBy       User            @relation("DiaryCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  featuredCity    City?           @relation("DiaryFeaturedCity", fields: [featuredCityId], references: [id], onDelete: SetNull)
   places          DiaryPlace[]
 
   @@index([createdById, createdAt(sort: Desc)])
+  @@index([featuredCityId])
 }
 
 model DiaryPlace {

@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from "@nestjs/common";
 
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { AccessTokenGuard } from "../common/guards/access-token.guard";
@@ -6,6 +15,7 @@ import type { AccessTokenPayload } from "../auth/auth.types";
 import { AddDiaryPlaceDto } from "./dto/add-diary-place.dto";
 import { CreateDiaryDto } from "./dto/create-diary.dto";
 import { SearchDiariesQueryDto } from "./dto/search-diaries.query.dto";
+import { UpdateDiaryDto } from "./dto/update-diary.dto";
 import { SocialService } from "./social.service";
 
 @Controller("v1/diaries")
@@ -35,6 +45,15 @@ export class DiariesController {
     @Param("id") diaryId: string,
   ) {
     return this.socialService.getDiary(user.sub, diaryId);
+  }
+
+  @Patch(":id")
+  updateDiary(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param("id") diaryId: string,
+    @Body() body: UpdateDiaryDto,
+  ) {
+    return this.socialService.updateDiary(user.sub, diaryId, body);
   }
 
   @Post(":id/places")
