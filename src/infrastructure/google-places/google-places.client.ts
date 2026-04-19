@@ -111,6 +111,14 @@ export type GooglePlaceSummary = {
   primaryType?: string;
   photoUrl?: string;
   openNow?: boolean;
+  /** Solo uso interno antes de armar `openingChip` en la API. No exponer al cliente. */
+  openingWeekdayLines?: string[];
+};
+
+/** Respuesta pública de listados cercanos (sin líneas crudas de Google). */
+export type NearbyPlaceView = Omit<GooglePlaceSummary, "openingWeekdayLines"> & {
+  openingChip?: string;
+  socialChips?: string[];
 };
 
 export type FecaPlaceReview = {
@@ -364,6 +372,7 @@ export class GooglePlacesClient {
             "places.primaryType",
             "places.photos",
             "places.currentOpeningHours",
+            "places.regularOpeningHours",
           ].join(","),
         ),
         body: JSON.stringify(body),
@@ -395,6 +404,7 @@ export class GooglePlacesClient {
             "places.primaryType",
             "places.photos",
             "places.currentOpeningHours",
+            "places.regularOpeningHours",
           ].join(","),
         ),
         body: JSON.stringify({
@@ -575,7 +585,11 @@ export class GooglePlacesClient {
       photoUrl: place.photos?.[0]?.name
         ? this.buildPhotoUrl(place.photos[0].name, 400)
         : undefined,
-      openNow: place.currentOpeningHours?.openNow,
+      openNow:
+        place.currentOpeningHours?.openNow ?? place.regularOpeningHours?.openNow,
+      openingWeekdayLines:
+        place.regularOpeningHours?.weekdayDescriptions ??
+        place.currentOpeningHours?.weekdayDescriptions,
     };
   }
 

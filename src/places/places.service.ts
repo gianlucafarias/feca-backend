@@ -16,12 +16,14 @@ import {
   GooglePlacesClient,
   type GooglePlaceDetailView,
   type GooglePlaceSummary,
+  type NearbyPlaceView,
 } from "../infrastructure/google-places/google-places.client";
 import { CitiesRepository } from "../infrastructure/repositories/cities.repository";
 import { PlacesRepository } from "../infrastructure/repositories/places.repository";
 import { SocialRepository } from "../infrastructure/repositories/social.repository";
 import { rankCandidatesWithRotation } from "../lib/dynamic-ranking";
 import { distanceInMeters } from "../lib/geo";
+import { buildNearbyOpeningChip } from "../lib/nearby-opening-chip";
 import { scoreOutingAgainstIntent } from "../lib/outing-preferences";
 import { scoreTasteAgainstPlace } from "../lib/taste-place-score";
 import type { AutocompleteItem, PlaceRecord } from "../types";
@@ -320,7 +322,7 @@ export class PlacesService {
   async nearby(
     userId: string,
     input: GetNearbyPlacesQueryDto,
-  ): Promise<GooglePlaceSummary[]> {
+  ): Promise<NearbyPlaceView[]> {
     const coords = await this.resolveViewerCoordinates(
       userId,
       input.lat,
@@ -329,6 +331,9 @@ export class PlacesService {
     if (!coords) {
       return [];
     }
+
+    const present = (rows: GooglePlaceSummary[]) =>
+      this.presentNearbyPlaces(userId, rows);
 
     const resolved: NearbyQueryResolved = {
       ...input,
@@ -355,14 +360,16 @@ export class PlacesService {
     const candidateLimit = query ? resolved.limit : Math.min(resolved.limit * 3, 30);
     const cached = await this.cacheManager.get<GooglePlaceSummary[]>(cacheKey);
     if (cached) {
-      return query
-        ? cached.slice(0, resolved.limit)
-        : rankNearbyPlaceResults(
-            userId,
-            resolved,
-            cached,
-            signals.tastePreferenceIds,
-          );
+      return present(
+        query
+          ? cached.slice(0, resolved.limit)
+          : rankNearbyPlaceResults(
+              userId,
+              resolved,
+              cached,
+              signals.tastePreferenceIds,
+            ),
+      );
     }
 
     if (this.google.isEnabled) {
@@ -396,14 +403,16 @@ export class PlacesService {
           Math.min(this.config.cacheTtlMs, 120000),
         );
 
-        return query
-          ? sanitized.slice(0, resolved.limit)
-          : rankNearbyPlaceResults(
-              userId,
-              resolved,
-              sanitized,
-              signals.tastePreferenceIds,
-            );
+        return present(
+          query
+            ? sanitized.slice(0, resolved.limit)
+            : rankNearbyPlaceResults(
+                userId,
+                resolved,
+                sanitized,
+                signals.tastePreferenceIds,
+              ),
+        );
       } catch (error) {
         this.logger.error("Places nearby failed", error);
       }
@@ -421,7 +430,8 @@ export class PlacesService {
               places,
               signals.tastePreferenceIds,
             ),
-      );
+      )
+      .then((rows) => present(rows));
   }
 
   async exploreContext(userId: string, input: ExploreContextQueryDto) {
@@ -496,7 +506,53 @@ export class PlacesService {
       .slice(0, resolved.limit)
       .map((entry) => entry.item);
 
-    return { places };
+    return {
+      places: await this.presentExploreRows(userId, places),
+    };
+  }
+
+  private async presentNearbyPlaces(
+    viewerId: string,
+    places: GooglePlaceSummary[],
+  ): Promise<NearbyPlaceView[]> {
+    if (places.length === 0) {
+      return [];
+    }
+
+    const socialMap =
+      await this.socialRepository.listNearbyNetworkChipsByGooglePlaceIds(
+        viewerId,
+        places.map((p) => p.googlePlaceId),
+      );
+
+    return places.map((place) => {
+      const socialChips = socialMap.get(place.googlePlaceId) ?? [];
+      const openingChip = buildNearbyOpeningChip(
+        place.openNow,
+        place.openingWeekdayLines,
+      );
+      const { openingWeekdayLines: _weekdayLines, ...rest } = place;
+      const view: NearbyPlaceView = { ...rest };
+      if (openingChip) {
+        view.openingChip = openingChip;
+      }
+      if (socialChips.length > 0) {
+        view.socialChips = socialChips;
+      }
+      return view;
+    });
+  }
+
+  private async presentExploreRows(
+    viewerId: string,
+    rows: Array<GooglePlaceSummary & { reason: string }>,
+  ): Promise<Array<NearbyPlaceView & { reason: string }>> {
+    const summaries = rows.map(({ reason: _reason, ...rest }) => rest);
+    const views = await this.presentNearbyPlaces(viewerId, summaries);
+    return views.map((view, i) => ({
+      ...view,
+      reason: rows[i].reason,
+    }));
   }
 
   private buildAutocompletePayload(
@@ -522,7 +578,7 @@ export class PlacesService {
 
   private buildNearbyCacheKey(input: NearbyQueryResolved, userId: string) {
     const variant = input.variant ?? "none";
-    return `places:nearby:${userId}:${variant}:${input.query?.trim().toLowerCase() ?? ""}:${input.type ?? "all"}:${input.lat.toFixed(3)}:${input.lng.toFixed(3)}:${input.limit}`;
+    return `places:nearby:v2:${userId}:${variant}:${input.query?.trim().toLowerCase() ?? ""}:${input.type ?? "all"}:${input.lat.toFixed(3)}:${input.lng.toFixed(3)}:${input.limit}`;
   }
 
   private async clearPlacesCache() {
@@ -631,6 +687,10 @@ function mapStoredPlaceToNearby(
     primaryType: place.categories[0],
     photoUrl: place.coverPhotoUrl,
     openNow: undefined,
+    openingWeekdayLines:
+      place.openingHours && place.openingHours.length > 0
+        ? place.openingHours
+        : undefined,
   };
 }
 
@@ -757,7 +817,7 @@ function buildNearbyPlaceScore(
     180 -
     distance / 45 +
     (place.rating ?? 0) * 8 +
-    (place.openNow ? 10 : 0) -
+    (place.openNow ? 34 : 0) -
     index * 1.5
   );
 }

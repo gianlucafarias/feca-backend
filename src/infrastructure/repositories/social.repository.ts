@@ -10,12 +10,17 @@ import {
   GuideVisibility,
   MemberProposalInteraction,
   PlaceProposalPolicy,
+  PlaceSource,
   Prisma,
   type UserSettings,
 } from "@prisma/client";
 
 import { rankCandidatesWithRotation } from "../../lib/dynamic-ranking";
 import { distanceInMeters } from "../../lib/geo";
+import {
+  formatNearbyVisitChip,
+  scoreNearbyVisitSignal,
+} from "../../lib/nearby-network-chips";
 import { scoreTasteAgainstVisitTags } from "../../lib/taste-place-score";
 import { PrismaService } from "../../database/prisma.service";
 
@@ -1294,6 +1299,173 @@ export class SocialRepository {
     });
 
     return this.findDiaryById(diaryId);
+  }
+
+  /**
+   * Chips cortos por lugar (googlePlaceId) para carruseles tipo home:
+   * volvería a ir, visitado por…, le gustaría ir (save sin visita), etc.
+   */
+  async listNearbyNetworkChipsByGooglePlaceIds(
+    viewerId: string,
+    googlePlaceIds: string[],
+  ): Promise<Map<string, string[]>> {
+    const result = new Map<string, string[]>();
+    const uniqueIds = Array.from(
+      new Set(googlePlaceIds.filter((id) => Boolean(id && id.trim()))),
+    );
+    for (const id of uniqueIds) {
+      result.set(id, []);
+    }
+    if (uniqueIds.length === 0) {
+      return result;
+    }
+
+    await this.ensureUserSettingsForAllUsers();
+
+    const followingIds = await this.listFollowingIds(viewerId);
+    if (followingIds.length === 0) {
+      return result;
+    }
+
+    const followingSet = new Set(followingIds);
+
+    const placeRows = await this.prisma.place.findMany({
+      where: {
+        source: PlaceSource.google,
+        sourcePlaceId: { in: uniqueIds },
+      },
+      select: { id: true, sourcePlaceId: true },
+    });
+
+    if (placeRows.length === 0) {
+      return result;
+    }
+
+    const fecaIds = placeRows.map((row) => row.id);
+
+    const [visits, saves] = await Promise.all([
+      this.prisma.visit.findMany({
+        where: {
+          placeId: { in: fecaIds },
+          userId: { in: followingIds },
+        },
+        include: visitInclude,
+        orderBy: [{ visitedAt: "desc" }, { createdAt: "desc" }],
+        take: 600,
+      }),
+      this.prisma.placeSave.findMany({
+        where: {
+          placeId: { in: fecaIds },
+          userId: { in: followingIds },
+        },
+        include: {
+          user: { include: { settings: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 400,
+      }),
+    ]);
+
+    const visibleVisits = visits.filter((visit) =>
+      isVisitVisibleToViewer(
+        viewerId,
+        visit.userId,
+        normalizeSettings(visit.user.settings),
+        followingSet.has(visit.userId),
+      ),
+    );
+
+    const visibleSaves = saves.filter((save) =>
+      canViewContent(
+        normalizeSettings(save.user.settings).activityVisibility,
+        followingSet.has(save.userId),
+      ),
+    );
+
+    for (const row of placeRows) {
+      const googleId = row.sourcePlaceId;
+      if (!googleId) {
+        continue;
+      }
+
+      const pid = row.id;
+
+      const userVisitMap = new Map<string, VisitWithRelations>();
+      for (const v of visibleVisits) {
+        if (v.placeId !== pid) {
+          continue;
+        }
+        const prev = userVisitMap.get(v.userId);
+        const nextSource = {
+          rating: v.rating,
+          wouldReturn: v.wouldReturn,
+          displayName: v.user.displayName || v.user.username,
+        };
+        if (!prev) {
+          userVisitMap.set(v.userId, v);
+          continue;
+        }
+        const prevSource = {
+          rating: prev.rating,
+          wouldReturn: prev.wouldReturn,
+          displayName: prev.user.displayName || prev.user.username,
+        };
+        if (scoreNearbyVisitSignal(nextSource) > scoreNearbyVisitSignal(prevSource)) {
+          userVisitMap.set(v.userId, v);
+        }
+      }
+
+      type Signal = { userId: string; score: number; chip: string };
+      const signals: Signal[] = [];
+
+      for (const visit of userVisitMap.values()) {
+        const source = {
+          rating: visit.rating,
+          wouldReturn: visit.wouldReturn,
+          displayName: visit.user.displayName || visit.user.username,
+        };
+        signals.push({
+          userId: visit.userId,
+          score: scoreNearbyVisitSignal(source),
+          chip: formatNearbyVisitChip(source),
+        });
+      }
+
+      const visitedUserIds = new Set(userVisitMap.keys());
+      for (const save of visibleSaves) {
+        if (save.placeId !== pid) {
+          continue;
+        }
+        if (visitedUserIds.has(save.userId)) {
+          continue;
+        }
+        const name = save.user.displayName || save.user.username;
+        signals.push({
+          userId: save.userId,
+          score: 26,
+          chip: `A ${name} le gustaría ir`,
+        });
+      }
+
+      signals.sort((a, b) => b.score - a.score);
+
+      const chips: string[] = [];
+      const usedUsers = new Set<string>();
+      for (const s of signals) {
+        if (chips.length >= 2) {
+          break;
+        }
+        if (usedUsers.has(s.userId)) {
+          continue;
+        }
+        usedUsers.add(s.userId);
+        chips.push(s.chip);
+      }
+
+      result.set(googleId, chips);
+    }
+
+    return result;
   }
 
   async getPlaceSocialContext(viewerId: string, placeId: string) {
