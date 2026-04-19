@@ -353,9 +353,9 @@ export class PlacesService {
     }
 
     const signals = await this.socialRepository.getUserRecommendationSignals(userId);
-    const cacheKey = this.buildNearbyCacheKey(resolved, userId);
     const query = resolved.query?.trim();
-    const candidateLimit = query ? resolved.limit : Math.min(resolved.limit * 3, 30);
+    const poolFetchLimit = 30;
+    const candidateLimit = query ? resolved.limit : poolFetchLimit;
 
     const finalizeNearby = async (candidates: GooglePlaceSummary[]) => {
       if (candidates.length === 0) {
@@ -365,54 +365,100 @@ export class PlacesService {
         userId,
         candidates.map((p) => p.googlePlaceId),
       );
+
+      let work = candidates;
+      if (resolved.variant === "home_open_now") {
+        work = candidates.filter((p) => p.openNow === true);
+        if (work.length === 0) {
+          return [];
+        }
+      }
+      if (resolved.variant === "home_friends_liked") {
+        work = candidates.filter(
+          (p) => (overlay.boosts.get(p.googlePlaceId) ?? 0) > 0,
+        );
+        if (work.length === 0) {
+          return [];
+        }
+      }
+
       const ranked = query
-        ? candidates.slice(0, resolved.limit)
+        ? work.slice(0, resolved.limit)
         : rankNearbyPlaceResults(
             userId,
             resolved,
-            candidates,
+            work,
             signals.tastePreferenceIds,
             overlay.boosts,
           );
       return this.presentNearbyPlaces(userId, ranked, overlay.chips);
     };
 
-    const cached = await this.cacheManager.get<GooglePlaceSummary[]>(cacheKey);
-    if (cached) {
-      return finalizeNearby(cached);
+    if (query) {
+      const cacheKey = this.buildNearbyQueryCacheKey(resolved, userId);
+      const cached = await this.cacheManager.get<GooglePlaceSummary[]>(cacheKey);
+      if (cached) {
+        return finalizeNearby(cached);
+      }
+
+      if (this.google.isEnabled) {
+        try {
+          const places = await this.google.searchText({
+            lat: resolved.lat,
+            lng: resolved.lng,
+            limit: candidateLimit,
+            query,
+            type: resolved.type,
+          });
+          const sanitized = places.filter(
+            (place) =>
+              Boolean(place.googlePlaceId) &&
+              Number.isFinite(place.lat) &&
+              Number.isFinite(place.lng),
+          );
+          await this.cacheManager.set(
+            cacheKey,
+            sanitized,
+            Math.min(this.config.cacheTtlMs, 120000),
+          );
+          return finalizeNearby(sanitized);
+        } catch (error) {
+          this.logger.error("Places nearby failed", error);
+        }
+      }
+
+      return this.placesRepository
+        .listNearbyPlaces(resolved.lat, resolved.lng, undefined, candidateLimit)
+        .then((places) => places.map((place) => mapStoredPlaceToNearby(place, query)))
+        .then((rows) => finalizeNearby(rows));
+    }
+
+    const poolKey = this.buildNearbyPoolCacheKey(userId, resolved);
+    const cachedPool = await this.cacheManager.get<GooglePlaceSummary[]>(poolKey);
+    if (cachedPool?.length) {
+      return finalizeNearby(cachedPool);
     }
 
     if (this.google.isEnabled) {
       try {
-        const places = query
-          ? await this.google.searchText({
-              lat: resolved.lat,
-              lng: resolved.lng,
-              limit: candidateLimit,
-              query,
-              type: resolved.type,
-            })
-          : await this.google.nearbySearch({
-              lat: resolved.lat,
-              lng: resolved.lng,
-              limit: candidateLimit,
-              radius: this.config.googlePlacesRadiusMeters,
-              type: resolved.type,
-            });
-
+        const places = await this.google.nearbySearch({
+          lat: resolved.lat,
+          lng: resolved.lng,
+          limit: poolFetchLimit,
+          radius: this.config.googlePlacesRadiusMeters,
+          type: resolved.type,
+        });
         const sanitized = places.filter(
           (place) =>
             Boolean(place.googlePlaceId) &&
             Number.isFinite(place.lat) &&
             Number.isFinite(place.lng),
         );
-
         await this.cacheManager.set(
-          cacheKey,
+          poolKey,
           sanitized,
           Math.min(this.config.cacheTtlMs, 120000),
         );
-
         return finalizeNearby(sanitized);
       } catch (error) {
         this.logger.error("Places nearby failed", error);
@@ -420,8 +466,8 @@ export class PlacesService {
     }
 
     return this.placesRepository
-      .listNearbyPlaces(resolved.lat, resolved.lng, undefined, candidateLimit)
-      .then((places) => places.map((place) => mapStoredPlaceToNearby(place, query)))
+      .listNearbyPlaces(resolved.lat, resolved.lng, undefined, poolFetchLimit)
+      .then((places) => places.map((place) => mapStoredPlaceToNearby(place)))
       .then((rows) => finalizeNearby(rows));
   }
 
@@ -570,9 +616,15 @@ export class PlacesService {
     return `places:autocomplete:${input.q.trim().toLowerCase()}:${input.city?.trim().toLowerCase() ?? ""}:${lat}:${lng}:${input.limit}`;
   }
 
-  private buildNearbyCacheKey(input: NearbyQueryResolved, userId: string) {
+  /** Pool compartido (sin texto) para todas las variantes de carrusel home. */
+  private buildNearbyPoolCacheKey(userId: string, input: Pick<NearbyQueryResolved, "lat" | "lng" | "type">) {
+    return `places:nearby:pool:v3:${userId}:${input.type ?? "all"}:${input.lat.toFixed(3)}:${input.lng.toFixed(3)}`;
+  }
+
+  private buildNearbyQueryCacheKey(input: NearbyQueryResolved, userId: string) {
     const variant = input.variant ?? "none";
-    return `places:nearby:v2:${userId}:${variant}:${input.query?.trim().toLowerCase() ?? ""}:${input.type ?? "all"}:${input.lat.toFixed(3)}:${input.lng.toFixed(3)}:${input.limit}`;
+    const q = input.query?.trim().toLowerCase() ?? "";
+    return `places:nearby:q:v2:${userId}:${variant}:${q}:${input.type ?? "all"}:${input.lat.toFixed(3)}:${input.lng.toFixed(3)}:${input.limit}`;
   }
 
   private async clearPlacesCache() {
@@ -633,6 +685,19 @@ export class PlacesService {
   }
 }
 
+function networkBoostScoreForVariant(
+  variant: NearbyQueryResolved["variant"],
+  rawBoost: number,
+): number {
+  if (variant === "home_network") {
+    return Math.min(56, rawBoost);
+  }
+  if (variant === "home_friends_liked") {
+    return Math.min(72, rawBoost * 2.45 + 6);
+  }
+  return 0;
+}
+
 function rankNearbyPlaceResults(
   userId: string,
   input: NearbyQueryResolved,
@@ -640,17 +705,22 @@ function rankNearbyPlaceResults(
   tastePreferenceIds: string[],
   networkBoostByGoogleId?: Map<string, number>,
 ) {
+  const variant = input.variant;
+  const useNetworkInRank =
+    variant === "home_network" || variant === "home_friends_liked";
+
   return rankCandidatesWithRotation(
-    places.map((place, index) => ({
-      baseScore:
-        buildNearbyPlaceScore(input, place, index) +
-        scoreTasteAgainstPlace(tastePreferenceIds, place.types ?? [], "solo") +
-        (input.variant === "home_network"
-          ? Math.min(56, networkBoostByGoogleId?.get(place.googlePlaceId) ?? 0)
-          : 0),
-      id: place.googlePlaceId,
-      item: place,
-    })),
+    places.map((place, index) => {
+      const rawBoost = networkBoostByGoogleId?.get(place.googlePlaceId) ?? 0;
+      return {
+        baseScore:
+          buildNearbyPlaceScore(input, place, index) +
+          scoreTasteAgainstPlace(tastePreferenceIds, place.types ?? [], "solo") +
+          (useNetworkInRank ? networkBoostScoreForVariant(variant, rawBoost) : 0),
+        id: place.googlePlaceId,
+        item: place,
+      };
+    }),
     {
       bucketHours: 1,
       jitterRatio: 0.14,

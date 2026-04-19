@@ -21,10 +21,27 @@ export class GetNearbyPlacesQueryDto {
   @IsIn(["cafe", "restaurant"])
   type?: "cafe" | "restaurant";
 
-  /** Contexto del cliente (p. ej. home) para variar ranking/caché sin cambiar coords. */
+  /**
+   * Contexto del cliente (home / secciones).
+   * - `home_nearby`: carrusel general “Lugares cerca”
+   * - `home_open_now`: solo `openNow` del mismo pool
+   * - `home_friends_liked`: lugares con señal de gente que seguís
+   * - `home_city` / `home_network`: compatibilidad con clientes viejos
+   */
   @IsOptional()
-  @IsIn(["home_city", "home_network"])
-  variant?: "home_city" | "home_network";
+  @IsIn([
+    "home_city",
+    "home_network",
+    "home_nearby",
+    "home_open_now",
+    "home_friends_liked",
+  ])
+  variant?:
+    | "home_city"
+    | "home_network"
+    | "home_nearby"
+    | "home_open_now"
+    | "home_friends_liked";
 
   /**
    * Opcional: el cliente manda p. ej. `Date.now()` al hacer pull-to-refresh para
