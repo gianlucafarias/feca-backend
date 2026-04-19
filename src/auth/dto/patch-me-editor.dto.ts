@@ -1,6 +1,6 @@
 import { IsBoolean } from "class-validator";
 
-export class PatchAdminEditorDto {
+export class PatchMeEditorDto {
   @IsBoolean()
   isEditor!: boolean;
 }
