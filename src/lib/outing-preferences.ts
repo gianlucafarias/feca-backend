@@ -13,7 +13,9 @@ export type OutingPreferencesV1 = {
     | "weekend_day"
     | "weekend_night"
   >;
-  /** Con quién suele salir más. */
+  /** Con quién suele salir (varias opciones). */
+  typicalCompanies?: Array<"solo" | "couple" | "small_group" | "large_group">;
+  /** @deprecated Usar `typicalCompanies`; se sigue leyendo por compatibilidad. */
   typicalCompany?: "solo" | "couple" | "small_group" | "large_group";
   /** Prioridades al elegir un lugar (orden sugerido). */
   placePriorities?: Array<
@@ -71,11 +73,23 @@ export function sanitizeOutingPreferences(raw: unknown): Prisma.JsonObject | nul
     }
   }
 
-  if (
+  if (Array.isArray(input.typicalCompanies)) {
+    const companies = input.typicalCompanies
+      .filter((c): c is string => typeof c === "string" && ALLOWED_COMPANY.has(c))
+      .slice(0, 8);
+    if (companies.length > 0) {
+      out.typicalCompanies =
+        companies as OutingPreferencesV1["typicalCompanies"];
+    }
+  } else if (
     typeof input.typicalCompany === "string" &&
     ALLOWED_COMPANY.has(input.typicalCompany)
   ) {
-    out.typicalCompany = input.typicalCompany as OutingPreferencesV1["typicalCompany"];
+    out.typicalCompanies = [
+      input.typicalCompany as NonNullable<
+        OutingPreferencesV1["typicalCompanies"]
+      >[number],
+    ];
   }
 
   if (Array.isArray(input.placePriorities)) {
@@ -83,7 +97,7 @@ export function sanitizeOutingPreferences(raw: unknown): Prisma.JsonObject | nul
       .filter(
         (p): p is string => typeof p === "string" && ALLOWED_PRIORITIES.has(p),
       )
-      .slice(0, 6);
+      .slice(0, 12);
     if (priorities.length > 0) {
       out.placePriorities =
         priorities as OutingPreferencesV1["placePriorities"];
@@ -105,15 +119,27 @@ export function scoreOutingAgainstIntent(
   const p = prefs as Partial<OutingPreferencesV1>;
   let bonus = 0;
   const slots = new Set(p.typicalOutingSlots ?? []);
-  const company = p.typicalCompany;
+  const companies = new Set<string>(
+    p.typicalCompanies?.length
+      ? p.typicalCompanies
+      : p.typicalCompany
+        ? [p.typicalCompany]
+        : [],
+  );
 
-  if (intent === "solo" && company === "solo") {
+  if (intent === "solo" && companies.has("solo")) {
     bonus += 10;
   }
-  if (intent === "group_4" && (company === "small_group" || company === "large_group")) {
+  if (
+    intent === "group_4" &&
+    (companies.has("small_group") || companies.has("large_group"))
+  ) {
     bonus += 12;
   }
-  if (intent === "first_date" && (company === "couple" || company === "solo")) {
+  if (
+    intent === "first_date" &&
+    (companies.has("couple") || companies.has("solo"))
+  ) {
     bonus += 8;
   }
   if (intent === "work_2h" && slots.has("weekday_morning")) {

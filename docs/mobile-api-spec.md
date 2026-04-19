@@ -157,7 +157,7 @@ Parcial para perfil y contexto de ciudad. Si se envía ubicación, debe enviarse
 }
 ```
 
-También se acepta `outingPreferences` (objeto con `schemaVersion: 1` y campos opcionales `typicalOutingSlots`, `typicalCompany`, `placePriorities`) o `null` para borrar.
+También se acepta `outingPreferences` (objeto con `schemaVersion: 1` y campos opcionales `typicalOutingSlots`, `typicalCompanies` (array), `placePriorities`) o `null` para borrar. El backend aún acepta el campo legacy `typicalCompany` (string) y lo normaliza a `typicalCompanies`.
 
 ### `GET /v1/me/settings/social`
 
