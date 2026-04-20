@@ -16,6 +16,8 @@ NestJS backend for FECA's mobile app, including places, visits, saves, feed, fol
 
 - [Mobile API spec](./docs/mobile-api-spec.md)
 - [Social graph](./docs/social-graph.md)
+- [Railway production](./docs/railway-production.md)
+- [Oracle Cloud deployment](./docs/oracle-cloud-deployment.md)
 
 ## Setup
 

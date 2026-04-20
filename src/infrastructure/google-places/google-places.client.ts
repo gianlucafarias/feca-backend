@@ -142,6 +142,11 @@ export type NearbyPlaceView = Omit<GooglePlaceSummary, "openingWeekdayLines"> & 
   socialChips?: string[];
   /** Preferido por el cliente para avatar + @handle sin parsear texto. */
   friendSocialRows?: NearbyFriendSocialRow[];
+  /**
+   * Recordatorio de la propia visita reseñada con "volvería a ir", tras el quiet period
+   * (p. ej. "Lo visitaste hace un mes"). Lo arma el backend en nearby/explore.
+   */
+  viewerVisitReminderChip?: string;
 };
 
 export type FecaPlaceReview = {
@@ -198,6 +203,8 @@ type NearbyParams = {
   limit: number;
   radius: number;
   type?: "cafe" | "restaurant";
+  /** Por defecto DISTANCE. POPULARITY ayuda a mezclar candidatos vs otra pasada por distancia. */
+  rankPreference?: "DISTANCE" | "POPULARITY";
 };
 
 @Injectable()
@@ -455,7 +462,7 @@ export class GooglePlacesClient {
           includedTypes,
           languageCode: this.config.googlePlacesLanguage,
           maxResultCount,
-          rankPreference: "DISTANCE",
+          rankPreference: params.rankPreference ?? "DISTANCE",
           locationRestriction: {
             circle: {
               center: {

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   BadRequestException,
   BadGatewayException,
@@ -26,7 +28,8 @@ import { rankCandidatesWithRotation } from "../lib/dynamic-ranking";
 import { distanceInMeters } from "../lib/geo";
 import type { NearbyFriendSocialRow } from "../lib/nearby-network-chips";
 import { buildNearbyOpeningChip } from "../lib/nearby-opening-chip";
-import { utcWeekBucketId } from "../lib/ranking-time-seed";
+import type { ViewerRadarPlaceState } from "../lib/viewer-nearby-visit-reminder";
+import { utcHourBucketId, utcWeekBucketId } from "../lib/ranking-time-seed";
 import { scoreOutingAgainstIntent } from "../lib/outing-preferences";
 import { scoreTasteAgainstPlace } from "../lib/taste-place-score";
 import type { AutocompleteItem, CityRecord, PlaceRecord } from "../types";
@@ -442,10 +445,11 @@ export class PlacesService {
       if (candidates.length === 0) {
         return [];
       }
-      const overlay = await this.socialRepository.getNearbyNetworkSignalsForGooglePlaces(
-        userId,
-        candidates.map((p) => p.googlePlaceId),
-      );
+      const googleIds = candidates.map((p) => p.googlePlaceId);
+      const [overlay, viewerRadar] = await Promise.all([
+        this.socialRepository.getNearbyNetworkSignalsForGooglePlaces(userId, googleIds),
+        this.socialRepository.getViewerRadarVisitOverlay(userId, googleIds),
+      ]);
 
       let work = candidates;
       if (resolved.variant === "home_open_now") {
@@ -463,6 +467,14 @@ export class PlacesService {
         }
       }
 
+      work = work.filter((p) => {
+        const st = viewerRadar.get(p.googlePlaceId);
+        return st?.kind !== "exclude_from_radar";
+      });
+      if (work.length === 0) {
+        return [];
+      }
+
       const ranked = query
         ? work.slice(0, resolved.limit)
         : rankNearbyPlaceResults(
@@ -475,6 +487,7 @@ export class PlacesService {
       return this.presentNearbyPlaces(userId, ranked, {
         chips: overlay.chips,
         friendRows: overlay.friendRows,
+        viewerRadar,
       });
     };
 
@@ -552,7 +565,7 @@ export class PlacesService {
         .then((rows) => finalizeNearby(rows));
     }
 
-    const poolKey = this.buildNearbyPoolCacheKey(resolved);
+    const poolKey = this.buildNearbyPoolCacheKey(userId, resolved);
     const cachedPool = await this.cacheManager.get<GooglePlaceSummary[]>(poolKey);
     if (cachedPool != null) {
       this.traceGoogleCache("nearbySearch", {
@@ -575,22 +588,7 @@ export class PlacesService {
               singleFlight: "leader",
             });
 
-            const places = await this.google.nearbySearch(
-              {
-                lat: resolved.lat,
-                lng: resolved.lng,
-                limit: poolFetchLimit,
-                radius: this.config.googlePlacesRadiusMeters,
-                type: resolved.type,
-              },
-              {
-                cache: "miss",
-                key: poolKey,
-                origin,
-                singleFlight: "leader",
-              },
-            );
-
+            const places = await this.fetchNearbyGooglePool(userId, resolved);
             const raw = places.filter(
               (place) =>
                 Boolean(place.googlePlaceId) &&
@@ -643,12 +641,27 @@ export class PlacesService {
 
     const signals = await this.socialRepository.getUserRecommendationSignals(userId);
 
-    const nearby = await this.placesRepository.listNearbyPlaces(
+    const nearbyRaw = await this.placesRepository.listNearbyPlaces(
       resolved.lat,
       resolved.lng,
       undefined,
       Math.min(resolved.limit * 3, 30),
     );
+
+    const exploreGoogleIds = nearbyRaw
+      .map((p) => p.sourcePlaceId)
+      .filter((id): id is string => Boolean(id && id.trim()));
+    const viewerRadarExplore =
+      await this.socialRepository.getViewerRadarVisitOverlay(userId, exploreGoogleIds);
+
+    const nearby = nearbyRaw.filter((place) => {
+      const gid = place.sourcePlaceId;
+      if (!gid) {
+        return true;
+      }
+      const st = viewerRadarExplore.get(gid);
+      return st?.kind !== "exclude_from_radar";
+    });
 
     const places = rankCandidatesWithRotation(
       nearby.map((place) => {
@@ -681,25 +694,29 @@ export class PlacesService {
         };
       }),
       {
-        jitterRatio: 0.08,
-        maxJitter: 9,
-      seed: buildPlacesRankingSeed(
-        userId,
-        `explore:${resolved.intent}`,
-        resolved.lat,
-        resolved.lng,
-        "all",
-        undefined,
-        undefined,
-      ),
-        topWindow: Math.max(resolved.limit * 4, 20),
+        bucketHours: 1,
+        jitterRatio: 0.14,
+        maxJitter: 14,
+        seed: buildPlacesRankingSeed(
+          userId,
+          `explore:${resolved.intent}`,
+          resolved.lat,
+          resolved.lng,
+          "all",
+          undefined,
+          undefined,
+        ),
+        topWindow: Math.min(
+          nearby.length,
+          Math.max(resolved.limit * 5, 28),
+        ),
       },
     )
       .slice(0, resolved.limit)
       .map((entry) => entry.item);
 
     return {
-      places: await this.presentExploreRows(userId, places),
+      places: await this.presentExploreRows(userId, places, viewerRadarExplore),
     };
   }
 
@@ -707,22 +724,28 @@ export class PlacesService {
     viewerId: string,
     places: GooglePlaceSummary[],
     preloaded?: {
-      chips: Map<string, string[]>;
-      friendRows: Map<string, NearbyFriendSocialRow[]>;
+      chips?: Map<string, string[]>;
+      friendRows?: Map<string, NearbyFriendSocialRow[]>;
+      viewerRadar?: Map<string, ViewerRadarPlaceState>;
     },
   ): Promise<NearbyPlaceView[]> {
     if (places.length === 0) {
       return [];
     }
 
-    const bundle =
-      preloaded ??
-      (await this.socialRepository.listNearbyNetworkChipsByGooglePlaceIds(
-        viewerId,
-        places.map((p) => p.googlePlaceId),
-      ));
-    const socialMap = bundle.chips;
-    const friendRowsMap = bundle.friendRows;
+    const googleIds = places.map((p) => p.googlePlaceId);
+    const networkBundle =
+      preloaded?.chips != null && preloaded?.friendRows != null
+        ? { chips: preloaded.chips, friendRows: preloaded.friendRows }
+        : await this.socialRepository.listNearbyNetworkChipsByGooglePlaceIds(
+            viewerId,
+            googleIds,
+          );
+    const socialMap = networkBundle.chips;
+    const friendRowsMap = networkBundle.friendRows;
+    const viewerRadarMap =
+      preloaded?.viewerRadar ??
+      (await this.socialRepository.getViewerRadarVisitOverlay(viewerId, googleIds));
 
     return places.map((place) => {
       const socialChips = socialMap.get(place.googlePlaceId) ?? [];
@@ -742,6 +765,10 @@ export class PlacesService {
       if (friendSocialRows.length > 0) {
         view.friendSocialRows = friendSocialRows;
       }
+      const radarSt = viewerRadarMap.get(place.googlePlaceId);
+      if (radarSt?.kind === "remind") {
+        view.viewerVisitReminderChip = radarSt.chip;
+      }
       return view;
     });
   }
@@ -749,9 +776,12 @@ export class PlacesService {
   private async presentExploreRows(
     viewerId: string,
     rows: Array<GooglePlaceSummary & { reason: string }>,
+    viewerRadar?: Map<string, ViewerRadarPlaceState>,
   ): Promise<Array<NearbyPlaceView & { reason: string }>> {
     const summaries = rows.map(({ reason: _reason, ...rest }) => rest);
-    const views = await this.presentNearbyPlaces(viewerId, summaries);
+    const views = await this.presentNearbyPlaces(viewerId, summaries, {
+      ...(viewerRadar ? { viewerRadar } : {}),
+    });
     return views.map((view, i) => ({
       ...view,
       reason: rows[i].reason,
@@ -787,9 +817,49 @@ export class PlacesService {
 
   /** Pool compartido (sin texto) para todas las variantes de carrusel home. */
   private buildNearbyPoolCacheKey(
+    userId: string,
     input: Pick<NearbyQueryResolved, "lat" | "lng" | "type">,
   ) {
-    return `places:nearby:pool:v4:${input.type ?? "all"}:${input.lat.toFixed(3)}:${input.lng.toFixed(3)}`;
+    const rankSlot = nearbyPoolRankSlotKey(new Date(), userId, input.type);
+    return `places:nearby:pool:v6:${userId}:${input.type ?? "all"}:${input.lat.toFixed(3)}:${input.lng.toFixed(3)}:${rankSlot}`;
+  }
+
+  /**
+   * Una sola llamada a Google: tipos por defecto (café + restaurante en el mismo request).
+   * Alterna `rankPreference` por ventana horaria + usuario (clave de caché alineada) y
+   * baraja estable el resultado para no heredar siempre el mismo orden de la API.
+   */
+  private async fetchNearbyGooglePool(
+    userId: string,
+    resolved: Pick<NearbyQueryResolved, "lat" | "lng" | "type">,
+  ): Promise<GooglePlaceSummary[]> {
+    const radius = this.config.googlePlacesRadiusMeters;
+    const limit = 20;
+    const now = new Date();
+
+    if (resolved.type) {
+      const rows = await this.google.nearbySearch({
+        lat: resolved.lat,
+        lng: resolved.lng,
+        limit,
+        radius,
+        type: resolved.type,
+      });
+      return stableShuffleGooglePlaces(rows, shuffleSeed(userId, resolved, now, "typed"));
+    }
+
+    const rankPreference = nearbyPoolRankPreference(now, userId, resolved.type);
+    const rows = await this.google.nearbySearch({
+      lat: resolved.lat,
+      lng: resolved.lng,
+      limit,
+      radius,
+      rankPreference,
+    });
+    return stableShuffleGooglePlaces(
+      rows,
+      shuffleSeed(userId, resolved, now, rankPreference === "POPULARITY" ? "pop" : "dist"),
+    );
   }
 
   private buildNearbyQueryCacheKey(input: NearbyQueryResolved) {
@@ -1018,7 +1088,18 @@ function rankNearbyPlaceResults(
   const useNetworkInRank =
     variant === "home_network" || variant === "home_friends_liked";
 
-  return rankCandidatesWithRotation(
+  const homeMix =
+    !useNetworkInRank &&
+    (variant === undefined ||
+      variant === "home_nearby" ||
+      variant === "home_open_now");
+
+  const topWindow = Math.min(
+    places.length,
+    homeMix ? Math.max(input.limit * 6, 32) : Math.max(input.limit * 4, 20),
+  );
+
+  const ranked = rankCandidatesWithRotation(
     places.map((place, index) => {
       const rawBoost = networkBoostByGoogleId?.get(place.googlePlaceId) ?? 0;
       return {
@@ -1032,8 +1113,8 @@ function rankNearbyPlaceResults(
     }),
     {
       bucketHours: 1,
-      jitterRatio: 0.14,
-      maxJitter: 18,
+      jitterRatio: homeMix ? 0.24 : 0.14,
+      maxJitter: homeMix ? 28 : 18,
       seed: buildPlacesRankingSeed(
         userId,
         "nearby",
@@ -1043,11 +1124,14 @@ function rankNearbyPlaceResults(
         input.variant,
         input.rotate,
       ),
-      topWindow: Math.max(input.limit * 4, 20),
+      topWindow,
     },
-  )
-    .slice(0, input.limit)
-    .map((entry) => entry.item);
+  );
+
+  const ordered = ranked.map((entry) => entry.item);
+  return homeMix
+    ? diversifyTopPlacesByCategory(ordered, input.limit)
+    : ordered.slice(0, input.limit);
 }
 
 function mapStoredPlaceToNearby(
@@ -1197,8 +1281,97 @@ function buildNearbyPlaceScore(
     distance / 45 +
     (place.rating ?? 0) * 8 +
     (place.openNow ? 34 : 0) -
-    index * 1.5
+    index * 0.35
   );
+}
+
+/** Alterna distancia vs popularidad sin segunda llamada; slot en caché debe coincidir. */
+function nearbyPoolRankPreference(
+  now: Date,
+  userId: string,
+  type: NearbyQueryResolved["type"] | undefined,
+): "DISTANCE" | "POPULARITY" {
+  if (type) {
+    return "DISTANCE";
+  }
+  const salt =
+    (userId.length > 0 ? userId.charCodeAt(userId.length - 1) : 0) +
+    now.getUTCHours() * 3 +
+    Math.floor(now.getUTCMinutes() / 20);
+  return salt % 2 === 0 ? "DISTANCE" : "POPULARITY";
+}
+
+function nearbyPoolRankSlotKey(
+  now: Date,
+  userId: string,
+  type: NearbyQueryResolved["type"] | undefined,
+): string {
+  if (type) {
+    return "typed";
+  }
+  return nearbyPoolRankPreference(now, userId, type) === "POPULARITY" ? "pop" : "dist";
+}
+
+function shuffleSeed(
+  userId: string,
+  resolved: Pick<NearbyQueryResolved, "lat" | "lng" | "type">,
+  now: Date,
+  tag: string,
+): string {
+  return `${userId}:${utcHourBucketId(now)}:${resolved.lat.toFixed(3)}:${resolved.lng.toFixed(3)}:${resolved.type ?? "mix"}:${tag}`;
+}
+
+function stableShuffleGooglePlaces(
+  items: GooglePlaceSummary[],
+  seed: string,
+): GooglePlaceSummary[] {
+  if (items.length <= 1) {
+    return [...items];
+  }
+  const arr = [...items];
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const id = arr[i]!.googlePlaceId ?? `${i}`;
+    const h = createHash("sha256")
+      .update(`${seed}:${id}:${i}`)
+      .digest("hex")
+      .slice(0, 8);
+    const j = Number.parseInt(h, 16) % (i + 1);
+    const tmp = arr[i]!;
+    arr[i] = arr[j]!;
+    arr[j] = tmp;
+  }
+  return arr;
+}
+
+function placeVarietyKey(place: GooglePlaceSummary): string {
+  const t = (place.primaryType ?? place.types?.[0] ?? "place").toLowerCase();
+  return t.includes("restaurant") ? "restaurant" : t.includes("cafe") ? "cafe" : t;
+}
+
+/** Evita que el top del carrusel sea siempre 5 cafés seguidos si el pool mezcla tipos. */
+function diversifyTopPlacesByCategory(
+  rankedOrdered: GooglePlaceSummary[],
+  limit: number,
+): GooglePlaceSummary[] {
+  if (rankedOrdered.length <= limit) {
+    return rankedOrdered;
+  }
+  const pool = [...rankedOrdered];
+  const out: GooglePlaceSummary[] = [];
+  while (out.length < limit && pool.length) {
+    const prevKey =
+      out.length > 0 ? placeVarietyKey(out[out.length - 1]!) : null;
+    const idx =
+      prevKey == null
+        ? 0
+        : pool.findIndex((p) => placeVarietyKey(p) !== prevKey);
+    if (idx === -1) {
+      out.push(pool.shift()!);
+    } else {
+      out.push(pool.splice(idx, 1)[0]!);
+    }
+  }
+  return out;
 }
 
 function buildPlacesRankingSeed(
@@ -1212,11 +1385,12 @@ function buildPlacesRankingSeed(
 ) {
   const v = variant?.trim() ? variant : "";
   const week = utcWeekBucketId(new Date());
+  const hour = utcHourBucketId(new Date());
   const r =
     rotate != null && Number.isFinite(rotate) && rotate > 0
       ? String(Math.floor(rotate))
       : "";
-  return `${userId}:${scope}:${type}:${v}:${week}:${lat.toFixed(2)}:${lng.toFixed(2)}:${r}`;
+  return `${userId}:${scope}:${type}:${v}:${week}:${hour}:${lat.toFixed(2)}:${lng.toFixed(2)}:${r}`;
 }
 
 function exploreReasonLine(intent: ExploreIntent, place: GooglePlaceSummary) {

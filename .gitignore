@@ -4,3 +4,4 @@ dist
 .railway
 
 .env
+deploy/oci/.env

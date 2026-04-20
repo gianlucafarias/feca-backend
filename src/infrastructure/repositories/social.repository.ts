@@ -19,6 +19,7 @@ import {
 
 import { rankCandidatesWithRotation } from "../../lib/dynamic-ranking";
 import { distanceInMeters } from "../../lib/geo";
+import { utcHourBucketId } from "../../lib/ranking-time-seed";
 import {
   formatFriendSnippetFromSave,
   formatFriendSnippetFromVisit,
@@ -28,6 +29,10 @@ import {
   scoreNearbyVisitSignal,
 } from "../../lib/nearby-network-chips";
 import { scoreTasteAgainstVisitTags } from "../../lib/taste-place-score";
+import {
+  type ViewerRadarPlaceState,
+  viewerRadarStateFromVisit,
+} from "../../lib/viewer-nearby-visit-reminder";
 import { PrismaService } from "../../database/prisma.service";
 
 type PaginationInput = {
@@ -1628,6 +1633,89 @@ export class SocialRepository {
     return { chips: chipsResult, boosts: boostsResult, friendRows: friendRowsResult };
   }
 
+  /**
+   * Estado de radar del propio usuario por lugar (reseña escrita + wouldReturn).
+   * No depende de la red; sirve para filtrar carruseles y opcional chip de recordatorio.
+   */
+  async getViewerRadarVisitOverlay(
+    viewerId: string,
+    googlePlaceIds: string[],
+  ): Promise<Map<string, ViewerRadarPlaceState>> {
+    const out = new Map<string, ViewerRadarPlaceState>();
+    const uniqueIds = Array.from(
+      new Set(googlePlaceIds.filter((id) => Boolean(id && id.trim()))),
+    );
+    for (const id of uniqueIds) {
+      out.set(id, { kind: "neutral" });
+    }
+    if (uniqueIds.length === 0) {
+      return out;
+    }
+
+    const placeRows = await this.prisma.place.findMany({
+      where: {
+        source: PlaceSource.google,
+        sourcePlaceId: { in: uniqueIds },
+      },
+      select: { id: true, sourcePlaceId: true },
+    });
+
+    if (placeRows.length === 0) {
+      return out;
+    }
+
+    const fecaIds = placeRows.map((row) => row.id);
+
+    const visits = await this.prisma.visit.findMany({
+      where: {
+        userId: viewerId,
+        placeId: { in: fecaIds },
+      },
+      orderBy: [{ visitedAt: "desc" }, { createdAt: "desc" }],
+      select: {
+        placeId: true,
+        visitedAt: true,
+        wouldReturn: true,
+        note: true,
+      },
+      take: 800,
+    });
+
+    const latestByPlaceId = new Map<
+      string,
+      { visitedAt: Date; wouldReturn: (typeof visits)[0]["wouldReturn"]; note: string }
+    >();
+    for (const v of visits) {
+      if (!latestByPlaceId.has(v.placeId)) {
+        latestByPlaceId.set(v.placeId, {
+          visitedAt: v.visitedAt,
+          wouldReturn: v.wouldReturn,
+          note: v.note,
+        });
+      }
+    }
+
+    for (const row of placeRows) {
+      const googleId = row.sourcePlaceId;
+      if (!googleId) {
+        continue;
+      }
+      const latest = latestByPlaceId.get(row.id);
+      if (!latest) {
+        out.set(googleId, { kind: "neutral" });
+        continue;
+      }
+      const state = viewerRadarStateFromVisit({
+        visitedAt: latest.visitedAt,
+        wouldReturn: latest.wouldReturn,
+        hasWrittenReview: latest.note.trim().length > 0,
+      });
+      out.set(googleId, state);
+    }
+
+    return out;
+  }
+
   /** @deprecated Preferir `getNearbyNetworkSignalsForGooglePlaces` para evitar doble query. */
   async listNearbyNetworkChipsByGooglePlaceIds(
     viewerId: string,
@@ -1790,8 +1878,9 @@ export class SocialRepository {
         item: visit,
       })),
       {
-        jitterRatio: 0.045,
-        maxJitter: 7,
+        bucketHours: 1,
+        jitterRatio: 0.08,
+        maxJitter: 12,
         seed: buildRankingSeed(userId, "feed-network", undefined, undefined),
         topWindow: pool.length,
       },
@@ -1844,8 +1933,9 @@ export class SocialRepository {
           item: visit,
         })),
       {
-        jitterRatio: 0.07,
-        maxJitter: 12,
+        bucketHours: 1,
+        jitterRatio: 0.1,
+        maxJitter: 14,
         seed: buildRankingSeed(
           userId,
           "feed-nearby",
@@ -1898,18 +1988,46 @@ export class SocialRepository {
       },
     };
 
-    const [visits, total] = await Promise.all([
+    const poolTake = Math.min(
+      600,
+      Math.max((input.offset + input.limit) * 18, input.limit * 24, 140),
+    );
+
+    const [pool, total] = await Promise.all([
       this.prisma.visit.findMany({
         where,
         include: visitInclude,
         orderBy: [{ visitedAt: "desc" }, { createdAt: "desc" }],
-        skip: input.offset,
-        take: input.limit,
+        skip: 0,
+        take: poolTake,
       }),
       this.prisma.visit.count({ where }),
     ]);
 
-    return { total, visits };
+    const ranked = rankCandidatesWithRotation(
+      pool.map((visit) => ({
+        baseScore:
+          visit.visitedAt.getTime() / 86_400_000 +
+          visit.rating * 2.5 +
+          (visit.note.length > 80 ? 4 : 0),
+        id: visit.id,
+        item: visit,
+      })),
+      {
+        bucketHours: 1,
+        jitterRatio: 0.12,
+        maxJitter: 16,
+        seed: buildRankingSeed(userId, "feed-city", undefined, undefined),
+        topWindow: Math.min(pool.length, Math.max(input.limit * 8, 48)),
+      },
+    );
+
+    return {
+      total,
+      visits: ranked
+        .slice(input.offset, input.offset + input.limit)
+        .map((entry) => entry.item),
+    };
   }
 
   private async listNowFeed(userId: string, input: FeedInput) {
@@ -2371,11 +2489,12 @@ function buildRankingSeed(
   scope: string,
   lat?: number,
   lng?: number,
+  now: Date = new Date(),
 ) {
   const latPart = typeof lat === "number" ? lat.toFixed(2) : "na";
   const lngPart = typeof lng === "number" ? lng.toFixed(2) : "na";
 
-  return `${userId}:${scope}:${latPart}:${lngPart}`;
+  return `${userId}:${scope}:${latPart}:${lngPart}:${utcHourBucketId(now)}`;
 }
 
 function buildBestMoments(visits: VisitWithRelations[]) {
