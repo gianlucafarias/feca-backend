@@ -21,6 +21,11 @@ export class AddDiaryPlaceDto {
 
   @IsOptional()
   @IsString()
+  @MinLength(1)
+  sessionToken?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(240)
   note?: string;
 

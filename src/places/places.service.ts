@@ -14,6 +14,7 @@ import {
   type GoogleCitySummary,
   type FecaPlaceReview,
   GooglePlacesClient,
+  type GooglePlacesMethod,
   type GooglePlaceDetailView,
   type GooglePlaceSummary,
   type NearbyPlaceView,
@@ -28,7 +29,7 @@ import { buildNearbyOpeningChip } from "../lib/nearby-opening-chip";
 import { utcWeekBucketId } from "../lib/ranking-time-seed";
 import { scoreOutingAgainstIntent } from "../lib/outing-preferences";
 import { scoreTasteAgainstPlace } from "../lib/taste-place-score";
-import type { AutocompleteItem, PlaceRecord } from "../types";
+import type { AutocompleteItem, CityRecord, PlaceRecord } from "../types";
 import { AutocompleteCitiesQueryDto } from "./dto/autocomplete-cities.query.dto";
 import { ExploreContextQueryDto } from "./dto/explore-context.query.dto";
 import { AutocompletePlacesQueryDto } from "./dto/autocomplete-places.query.dto";
@@ -48,9 +49,16 @@ type ExploreContextResolved = Omit<ExploreContextQueryDto, "lat" | "lng"> & {
   lng: number;
 };
 
+const RAW_GOOGLE_CANDIDATES_TTL_MS = 5 * 60 * 1000;
+const AUTOCOMPLETE_CITIES_TTL_MS = 60 * 1000;
+const PLACE_DETAIL_TTL_MS = 60 * 60 * 1000;
+const CITY_LOOKUP_TTL_MS = 24 * 60 * 60 * 1000;
+
 @Injectable()
 export class PlacesService {
   private readonly logger = new Logger(PlacesService.name);
+  private readonly inflight = new Map<string, Promise<unknown>>();
+  private autocompleteCacheVersion = 1;
 
   constructor(
     private readonly citiesRepository: CitiesRepository,
@@ -75,7 +83,7 @@ export class PlacesService {
     return this.socialRepository.getUserCoordinates(userId);
   }
 
-  async autocomplete(input: AutocompletePlacesQueryDto) {
+  async autocomplete(input: AutocompletePlacesQueryDto, origin?: string) {
     const localPlaces = await this.placesRepository.searchPlaces(
       input.q,
       input.city,
@@ -107,60 +115,92 @@ export class PlacesService {
     }
 
     const cacheKey = this.buildAutocompleteCacheKey(input);
-    const cached =
-      await this.cacheManager.get<ReturnType<typeof this.buildAutocompletePayload>>(
-        cacheKey,
-      );
+    const cached = await this.cacheManager.get<
+      ReturnType<PlacesService["buildAutocompletePayload"]>
+    >(cacheKey);
     if (cached) {
+      this.traceGoogleCache("autocomplete", {
+        cache: "hit",
+        key: cacheKey,
+        origin,
+      });
       return cached;
     }
 
     try {
-      const remoteItems = await this.google.autocomplete({
-        query: input.q,
-        lat: input.lat,
-        lng: input.lng,
-        sessionToken: input.sessionToken,
-        limit: input.limit,
-      });
-
-      const merged = new Map<string, AutocompleteItem>();
-
-      for (const item of localItems) {
-        merged.set(item.placeId ?? item.id, item);
-      }
-
-      for (const item of remoteItems) {
-        const existing = await this.placesRepository.getPlaceBySource(
-          "google",
-          item.sourcePlaceId,
-        );
-        const key = existing?.id ?? `google:${item.sourcePlaceId}`;
-
-        if (!merged.has(key)) {
-          merged.set(key, {
-            id: key,
-            source: "google",
-            sourcePlaceId: item.sourcePlaceId,
-            placeId: existing?.id ?? undefined,
-            name: item.name,
-            address: item.address,
-            city: input.city ?? "",
-            categories: [],
-            distanceMeters: item.distanceMeters,
-            alreadyInFeca: Boolean(existing),
+      return await this.runSingleFlight(
+        cacheKey,
+        async () => {
+          this.traceGoogleCache("autocomplete", {
+            cache: "miss",
+            key: cacheKey,
+            origin,
+            singleFlight: "leader",
           });
-        }
-      }
 
-      const payload = this.buildAutocompletePayload(
-        Array.from(merged.values()).slice(0, input.limit),
-        input.q,
-        true,
+          const remoteItems = await this.google.autocomplete(
+            {
+              query: input.q,
+              lat: input.lat,
+              lng: input.lng,
+              sessionToken: input.sessionToken,
+              limit: input.limit,
+            },
+            {
+              cache: "miss",
+              key: cacheKey,
+              origin,
+              singleFlight: "leader",
+            },
+          );
+
+          const merged = new Map<string, AutocompleteItem>();
+
+          for (const item of localItems) {
+            merged.set(item.placeId ?? item.id, item);
+          }
+
+          for (const item of remoteItems) {
+            const existing = await this.placesRepository.getPlaceBySource(
+              "google",
+              item.sourcePlaceId,
+            );
+            const key = existing?.id ?? `google:${item.sourcePlaceId}`;
+
+            if (!merged.has(key)) {
+              merged.set(key, {
+                id: key,
+                source: "google",
+                sourcePlaceId: item.sourcePlaceId,
+                placeId: existing?.id ?? undefined,
+                name: item.name,
+                address: item.address,
+                city: input.city ?? "",
+                categories: [],
+                distanceMeters: item.distanceMeters,
+                alreadyInFeca: Boolean(existing),
+              });
+            }
+          }
+
+          const payload = this.buildAutocompletePayload(
+            Array.from(merged.values()).slice(0, input.limit),
+            input.q,
+            true,
+          );
+          await this.cacheManager.set(cacheKey, payload, this.config.cacheTtlMs);
+
+          return payload;
+        },
+        () => {
+          this.traceGoogleCache("autocomplete", {
+            cache: "miss_joined",
+            key: cacheKey,
+            origin,
+            singleFlight: "joined",
+          });
+        },
       );
-      await this.cacheManager.set(cacheKey, payload, this.config.cacheTtlMs);
-
-      return payload;
     } catch (error) {
       this.logger.error("Places autocomplete failed", error);
 
@@ -168,18 +208,38 @@ export class PlacesService {
     }
   }
 
-  async autocompleteCities(input: AutocompleteCitiesQueryDto) {
+  async autocompleteCities(
+    input: AutocompleteCitiesQueryDto,
+    origin?: string,
+  ) {
     if (input.q.trim().length < 2) {
       return [];
     }
 
+    const cacheKey = this.buildCitiesAutocompleteCacheKey(input);
+
     try {
-      return await this.google.autocompleteCities({
-        query: input.q,
-        lat: input.lat,
-        lng: input.lng,
-        limit: input.limit,
-        sessionToken: input.sessionToken,
+      return await this.getCachedGoogleValue({
+        cacheKey,
+        method: "autocompleteCities",
+        origin,
+        ttl: AUTOCOMPLETE_CITIES_TTL_MS,
+        load: () =>
+          this.google.autocompleteCities(
+            {
+              query: input.q,
+              lat: input.lat,
+              lng: input.lng,
+              limit: input.limit,
+              sessionToken: input.sessionToken,
+            },
+            {
+              cache: "miss",
+              key: cacheKey,
+              origin,
+              singleFlight: "leader",
+            },
+          ),
       });
     } catch (error) {
       this.logger.error("City autocomplete failed", error);
@@ -187,8 +247,8 @@ export class PlacesService {
     }
   }
 
-  async reverseGeocodeCity(lat: number, lng: number) {
-    const city = await this.google.reverseGeocodeCity(lat, lng);
+  async reverseGeocodeCity(lat: number, lng: number, origin?: string) {
+    const city = await this.getCachedReverseGeocodeCity(lat, lng, origin);
 
     if (!city) {
       throw new NotFoundException("City not found for the provided coordinates");
@@ -197,27 +257,36 @@ export class PlacesService {
     return city;
   }
 
-  async resolveCityByGooglePlaceId(cityGooglePlaceId: string) {
-    return this.ensureStoredCityByGooglePlaceId(cityGooglePlaceId).then((city) => ({
-      city: city.name,
-      cityGooglePlaceId: city.googlePlaceId,
-      displayName: city.displayName,
-      lat: city.lat,
-      lng: city.lng,
-    }));
+  async resolveCityByGooglePlaceId(cityGooglePlaceId: string, origin?: string) {
+    return this.ensureStoredCityByGooglePlaceId(cityGooglePlaceId, origin).then(
+      (city) => ({
+        city: city.name,
+        cityGooglePlaceId: city.googlePlaceId,
+        displayName: city.displayName,
+        lat: city.lat,
+        lng: city.lng,
+      }),
+    );
   }
 
   /** Ciudad canónica persistida; usado p. ej. por el feed `mode=city` con ciudad seleccionada en el cliente. */
-  async getOrCreateCityRecordByGooglePlaceId(cityGooglePlaceId: string) {
-    return this.ensureStoredCityByGooglePlaceId(cityGooglePlaceId);
+  async getOrCreateCityRecordByGooglePlaceId(
+    cityGooglePlaceId: string,
+    origin?: string,
+  ): Promise<CityRecord> {
+    return this.ensureStoredCityByGooglePlaceId(cityGooglePlaceId, origin);
   }
 
   /** Ciudad canónica a partir de coordenadas (misma lógica que lugares / perfil). */
-  async getOrCreateCityRecordFromCoordinates(lat: number, lng: number) {
-    return this.ensureStoredCityForCoordinates(lat, lng);
+  async getOrCreateCityRecordFromCoordinates(
+    lat: number,
+    lng: number,
+    origin?: string,
+  ): Promise<CityRecord> {
+    return this.ensureStoredCityForCoordinates(lat, lng, origin);
   }
 
-  async resolve(input: ResolvePlaceDto) {
+  async resolve(input: ResolvePlaceDto, origin?: string) {
     const existing = await this.placesRepository.getPlaceBySource(
       input.source,
       input.sourcePlaceId,
@@ -227,10 +296,18 @@ export class PlacesService {
     }
 
     try {
-      const details = await this.google.getPlaceDetails(input.sourcePlaceId);
+      const details = await this.google.getPlaceDetails(input.sourcePlaceId, {
+        sessionToken: input.sessionToken,
+        trace: {
+          cache: "skip",
+          key: `places:resolve:${input.sourcePlaceId}`,
+          origin,
+        },
+      });
       const city = await this.ensureStoredCityForCoordinates(
         details.lat,
         details.lng,
+        origin,
       );
       const place = await this.placesRepository.upsertPlace({
         source: "google",
@@ -253,16 +330,17 @@ export class PlacesService {
         lastSyncedAt: details.lastSyncedAt,
       });
 
-      await this.clearPlacesCache();
+      this.bumpAutocompleteCacheNamespace();
       return place;
     } catch {
       throw new BadGatewayException("Could not resolve place from Google Places");
     }
   }
 
-  async createManualPlace(input: CreateManualPlaceDto) {
+  async createManualPlace(input: CreateManualPlaceDto, origin?: string) {
     const city = await this.ensureStoredCityByGooglePlaceId(
       input.cityGooglePlaceId,
+      origin,
     );
     const place = await this.placesRepository.createManualPlace({
       city: input.city,
@@ -272,13 +350,14 @@ export class PlacesService {
       lng: input.lng,
       name: input.name,
     });
-    await this.clearPlacesCache();
+    this.bumpAutocompleteCacheNamespace();
     return place;
   }
 
   async getPlaceProfile(
     viewerId: string,
     googlePlaceId: string,
+    origin?: string,
   ): Promise<GooglePlaceDetailView & { social?: Record<string, unknown> }> {
     const localPlace =
       (await this.placesRepository.getPlaceBySource("google", googlePlaceId)) ??
@@ -291,7 +370,7 @@ export class PlacesService {
 
     if (this.google.isEnabled) {
       try {
-        const detail = await this.google.getPlaceDetailView(googlePlaceId);
+        const detail = await this.getCachedPlaceDetailView(googlePlaceId, origin);
         const social = localPlace
           ? await this.socialRepository.getPlaceSocialContext(viewerId, localPlace.id)
           : undefined;
@@ -324,6 +403,7 @@ export class PlacesService {
   async nearby(
     userId: string,
     input: GetNearbyPlacesQueryDto,
+    origin?: string,
   ): Promise<NearbyPlaceView[]> {
     const coords = await this.resolveViewerCoordinates(
       userId,
@@ -399,31 +479,66 @@ export class PlacesService {
     };
 
     if (query) {
-      const cacheKey = this.buildNearbyQueryCacheKey(resolved, userId);
+      const cacheKey = this.buildNearbyQueryCacheKey(resolved);
       const cached = await this.cacheManager.get<GooglePlaceSummary[]>(cacheKey);
-      if (cached) {
+      if (cached != null) {
+        this.traceGoogleCache("searchText", {
+          cache: "hit",
+          key: cacheKey,
+          origin,
+        });
         return finalizeNearby(cached);
       }
 
       if (this.google.isEnabled) {
         try {
-          const places = await this.google.searchText({
-            lat: resolved.lat,
-            lng: resolved.lng,
-            limit: candidateLimit,
-            query,
-            type: resolved.type,
-          });
-          const sanitized = places.filter(
-            (place) =>
-              Boolean(place.googlePlaceId) &&
-              Number.isFinite(place.lat) &&
-              Number.isFinite(place.lng),
-          );
-          await this.cacheManager.set(
+          const sanitized = await this.runSingleFlight(
             cacheKey,
-            sanitized,
-            Math.min(this.config.cacheTtlMs, 120000),
+            async () => {
+              this.traceGoogleCache("searchText", {
+                cache: "miss",
+                key: cacheKey,
+                origin,
+                singleFlight: "leader",
+              });
+
+              const places = await this.google.searchText(
+                {
+                  lat: resolved.lat,
+                  lng: resolved.lng,
+                  limit: candidateLimit,
+                  query,
+                  type: resolved.type,
+                },
+                {
+                  cache: "miss",
+                  key: cacheKey,
+                  origin,
+                  singleFlight: "leader",
+                },
+              );
+
+              const raw = places.filter(
+                (place) =>
+                  Boolean(place.googlePlaceId) &&
+                  Number.isFinite(place.lat) &&
+                  Number.isFinite(place.lng),
+              );
+              await this.cacheManager.set(
+                cacheKey,
+                raw,
+                RAW_GOOGLE_CANDIDATES_TTL_MS,
+              );
+              return raw;
+            },
+            () => {
+              this.traceGoogleCache("searchText", {
+                cache: "miss_joined",
+                key: cacheKey,
+                origin,
+                singleFlight: "joined",
+              });
+            },
           );
           return finalizeNearby(sanitized);
         } catch (error) {
@@ -437,31 +552,66 @@ export class PlacesService {
         .then((rows) => finalizeNearby(rows));
     }
 
-    const poolKey = this.buildNearbyPoolCacheKey(userId, resolved);
+    const poolKey = this.buildNearbyPoolCacheKey(resolved);
     const cachedPool = await this.cacheManager.get<GooglePlaceSummary[]>(poolKey);
-    if (cachedPool?.length) {
+    if (cachedPool != null) {
+      this.traceGoogleCache("nearbySearch", {
+        cache: "hit",
+        key: poolKey,
+        origin,
+      });
       return finalizeNearby(cachedPool);
     }
 
     if (this.google.isEnabled) {
       try {
-        const places = await this.google.nearbySearch({
-          lat: resolved.lat,
-          lng: resolved.lng,
-          limit: poolFetchLimit,
-          radius: this.config.googlePlacesRadiusMeters,
-          type: resolved.type,
-        });
-        const sanitized = places.filter(
-          (place) =>
-            Boolean(place.googlePlaceId) &&
-            Number.isFinite(place.lat) &&
-            Number.isFinite(place.lng),
-        );
-        await this.cacheManager.set(
+        const sanitized = await this.runSingleFlight(
           poolKey,
-          sanitized,
-          Math.min(this.config.cacheTtlMs, 120000),
+          async () => {
+            this.traceGoogleCache("nearbySearch", {
+              cache: "miss",
+              key: poolKey,
+              origin,
+              singleFlight: "leader",
+            });
+
+            const places = await this.google.nearbySearch(
+              {
+                lat: resolved.lat,
+                lng: resolved.lng,
+                limit: poolFetchLimit,
+                radius: this.config.googlePlacesRadiusMeters,
+                type: resolved.type,
+              },
+              {
+                cache: "miss",
+                key: poolKey,
+                origin,
+                singleFlight: "leader",
+              },
+            );
+
+            const raw = places.filter(
+              (place) =>
+                Boolean(place.googlePlaceId) &&
+                Number.isFinite(place.lat) &&
+                Number.isFinite(place.lng),
+            );
+            await this.cacheManager.set(
+              poolKey,
+              raw,
+              RAW_GOOGLE_CANDIDATES_TTL_MS,
+            );
+            return raw;
+          },
+          () => {
+            this.traceGoogleCache("nearbySearch", {
+              cache: "miss_joined",
+              key: poolKey,
+              origin,
+              singleFlight: "joined",
+            });
+          },
         );
         return finalizeNearby(sanitized);
       } catch (error) {
@@ -626,51 +776,77 @@ export class PlacesService {
   private buildAutocompleteCacheKey(input: AutocompletePlacesQueryDto) {
     const lat = typeof input.lat === "number" ? input.lat.toFixed(3) : "na";
     const lng = typeof input.lng === "number" ? input.lng.toFixed(3) : "na";
-    return `places:autocomplete:${input.q.trim().toLowerCase()}:${input.city?.trim().toLowerCase() ?? ""}:${lat}:${lng}:${input.limit}`;
+    return `places:autocomplete:v${this.autocompleteCacheVersion}:${input.q.trim().toLowerCase()}:${input.city?.trim().toLowerCase() ?? ""}:${lat}:${lng}:${input.limit}`;
+  }
+
+  private buildCitiesAutocompleteCacheKey(input: AutocompleteCitiesQueryDto) {
+    const lat = typeof input.lat === "number" ? input.lat.toFixed(3) : "na";
+    const lng = typeof input.lng === "number" ? input.lng.toFixed(3) : "na";
+    return `places:cities:autocomplete:${input.q.trim().toLowerCase()}:${lat}:${lng}:${input.limit}`;
   }
 
   /** Pool compartido (sin texto) para todas las variantes de carrusel home. */
-  private buildNearbyPoolCacheKey(userId: string, input: Pick<NearbyQueryResolved, "lat" | "lng" | "type">) {
-    return `places:nearby:pool:v3:${userId}:${input.type ?? "all"}:${input.lat.toFixed(3)}:${input.lng.toFixed(3)}`;
+  private buildNearbyPoolCacheKey(
+    input: Pick<NearbyQueryResolved, "lat" | "lng" | "type">,
+  ) {
+    return `places:nearby:pool:v4:${input.type ?? "all"}:${input.lat.toFixed(3)}:${input.lng.toFixed(3)}`;
   }
 
-  private buildNearbyQueryCacheKey(input: NearbyQueryResolved, userId: string) {
-    const variant = input.variant ?? "none";
+  private buildNearbyQueryCacheKey(input: NearbyQueryResolved) {
     const q = input.query?.trim().toLowerCase() ?? "";
-    return `places:nearby:q:v2:${userId}:${variant}:${q}:${input.type ?? "all"}:${input.lat.toFixed(3)}:${input.lng.toFixed(3)}:${input.limit}`;
+    return `places:nearby:q:v3:${q}:${input.type ?? "all"}:${input.lat.toFixed(3)}:${input.lng.toFixed(3)}:${input.limit}`;
   }
 
-  private async clearPlacesCache() {
-    const cache = this.cacheManager as Cache & { clear?: () => Promise<void> };
-    if (cache.clear) {
-      await cache.clear();
-    }
+  private buildStoredCityCacheKey(cityGooglePlaceId: string) {
+    return `places:city:place:${cityGooglePlaceId}`;
   }
 
-  private async ensureStoredCityByGooglePlaceId(cityGooglePlaceId: string) {
+  private buildReverseCityCacheKey(lat: number, lng: number) {
+    return `places:city:reverse:${lat.toFixed(3)}:${lng.toFixed(3)}`;
+  }
+
+  private buildPlaceDetailCacheKey(placeId: string) {
+    return `places:detail:${placeId}`;
+  }
+
+  private async ensureStoredCityByGooglePlaceId(
+    cityGooglePlaceId: string,
+    origin?: string,
+  ): Promise<CityRecord> {
     try {
-      const existing =
-        await this.citiesRepository.findCityByGooglePlaceId(cityGooglePlaceId);
+      return await this.getCachedGoogleValue({
+        cacheKey: this.buildStoredCityCacheKey(cityGooglePlaceId),
+        method: "getCityByPlaceId",
+        origin,
+        ttl: CITY_LOOKUP_TTL_MS,
+        load: async () => {
+          const existing =
+            await this.citiesRepository.findCityByGooglePlaceId(cityGooglePlaceId);
 
-      if (existing) {
-        return existing;
-      }
+          if (existing) {
+            return existing;
+          }
 
-      const city = await this.google.getCityByPlaceId(cityGooglePlaceId);
+          const city = await this.google.getCityByPlaceId(cityGooglePlaceId, {
+            cache: "miss",
+            key: this.buildStoredCityCacheKey(cityGooglePlaceId),
+            origin,
+            singleFlight: "leader",
+          });
 
-      return this.citiesRepository.upsertCity({
-        displayName: city.displayName,
-        googlePlaceId: city.cityGooglePlaceId,
-        lat: city.lat,
-        lng: city.lng,
-        name: city.city,
+          return this.upsertCitySummary(city);
+        },
       });
     } catch {
       throw new BadRequestException("Invalid cityGooglePlaceId");
     }
   }
 
-  private async ensureStoredCityForCoordinates(lat?: number, lng?: number) {
+  private async ensureStoredCityForCoordinates(
+    lat?: number,
+    lng?: number,
+    origin?: string,
+  ): Promise<CityRecord> {
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
       throw new BadGatewayException("Resolved place is missing coordinates");
     }
@@ -678,7 +854,11 @@ export class PlacesService {
     const resolvedLat = lat as number;
     const resolvedLng = lng as number;
 
-    const city = await this.google.reverseGeocodeCity(resolvedLat, resolvedLng);
+    const city = await this.getCachedReverseGeocodeCity(
+      resolvedLat,
+      resolvedLng,
+      origin,
+    );
 
     if (!city) {
       throw new BadGatewayException("Could not resolve city for place");
@@ -687,7 +867,7 @@ export class PlacesService {
     return this.upsertCitySummary(city);
   }
 
-  private upsertCitySummary(city: GoogleCitySummary) {
+  private upsertCitySummary(city: GoogleCitySummary): Promise<CityRecord> {
     return this.citiesRepository.upsertCity({
       displayName: city.displayName,
       googlePlaceId: city.cityGooglePlaceId,
@@ -695,6 +875,122 @@ export class PlacesService {
       lng: city.lng,
       name: city.city,
     });
+  }
+
+  private getCachedReverseGeocodeCity(
+    lat: number,
+    lng: number,
+    origin?: string,
+  ): Promise<GoogleCitySummary | null> {
+    const cacheKey = this.buildReverseCityCacheKey(lat, lng);
+    return this.getCachedGoogleValue<GoogleCitySummary | null>({
+      allowNull: true,
+      cacheKey,
+      method: "reverseGeocodeCity",
+      origin,
+      ttl: CITY_LOOKUP_TTL_MS,
+      load: () =>
+        this.google.reverseGeocodeCity(lat, lng, {
+          cache: "miss",
+          key: cacheKey,
+          origin,
+          singleFlight: "leader",
+        }),
+    });
+  }
+
+  private getCachedPlaceDetailView(
+    placeId: string,
+    origin?: string,
+  ): Promise<GooglePlaceDetailView> {
+    const cacheKey = this.buildPlaceDetailCacheKey(placeId);
+    return this.getCachedGoogleValue<GooglePlaceDetailView>({
+      cacheKey,
+      method: "getPlaceDetailView",
+      origin,
+      ttl: PLACE_DETAIL_TTL_MS,
+      load: () =>
+        this.google.getPlaceDetailView(placeId, {
+          cache: "miss",
+          key: cacheKey,
+          origin,
+          singleFlight: "leader",
+        }),
+    });
+  }
+
+  private async getCachedGoogleValue<T>(options: {
+    allowNull?: boolean;
+    cacheKey: string;
+    method: GooglePlacesMethod;
+    origin?: string;
+    ttl: number;
+    load: () => Promise<T>;
+  }): Promise<T> {
+    const cached = await this.cacheManager.get<T>(options.cacheKey);
+    if (
+      typeof cached !== "undefined" &&
+      (options.allowNull === true || cached !== null)
+    ) {
+      this.traceGoogleCache(options.method, {
+        cache: "hit",
+        key: options.cacheKey,
+        origin: options.origin,
+      });
+      return cached as T;
+    }
+
+    return this.runSingleFlight(
+      options.cacheKey,
+      async () => {
+        this.traceGoogleCache(options.method, {
+          cache: "miss",
+          key: options.cacheKey,
+          origin: options.origin,
+          singleFlight: "leader",
+        });
+        const value = await options.load();
+        await this.cacheManager.set(options.cacheKey, value, options.ttl);
+        return value;
+      },
+      () => {
+        this.traceGoogleCache(options.method, {
+          cache: "miss_joined",
+          key: options.cacheKey,
+          origin: options.origin,
+          singleFlight: "joined",
+        });
+      },
+    );
+  }
+
+  private traceGoogleCache(
+    method: GooglePlacesMethod,
+    trace: Parameters<GooglePlacesClient["traceCacheEvent"]>[0]["trace"],
+  ) {
+    this.google.traceCacheEvent({ method, trace });
+  }
+
+  private async runSingleFlight<T>(
+    key: string,
+    load: () => Promise<T>,
+    onJoined?: () => void,
+  ) {
+    const existing = this.inflight.get(key) as Promise<T> | undefined;
+    if (existing) {
+      onJoined?.();
+      return existing;
+    }
+
+    const promise = load().finally(() => {
+      this.inflight.delete(key);
+    });
+    this.inflight.set(key, promise);
+    return promise;
+  }
+
+  private bumpAutocompleteCacheNamespace() {
+    this.autocompleteCacheVersion += 1;
   }
 }
 

@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from "@nestjs/common";
 
 import type { AccessTokenPayload } from "../auth/auth.types";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
@@ -15,19 +24,28 @@ export class PlacesController {
   constructor(private readonly placesService: PlacesService) {}
 
   @Get("autocomplete")
-  autocomplete(@Query() query: AutocompletePlacesQueryDto) {
-    return this.placesService.autocomplete(query);
+  autocomplete(
+    @Query() query: AutocompletePlacesQueryDto,
+    @Headers("x-feca-places-origin") origin?: string,
+  ) {
+    return this.placesService.autocomplete(query, origin);
   }
 
   @Post("resolve")
-  async resolve(@Body() body: ResolvePlaceDto) {
-    const place = await this.placesService.resolve(body);
+  async resolve(
+    @Body() body: ResolvePlaceDto,
+    @Headers("x-feca-places-origin") origin?: string,
+  ) {
+    const place = await this.placesService.resolve(body, origin);
     return { place };
   }
 
   @Post("manual")
-  async manual(@Body() body: CreateManualPlaceDto) {
-    const place = await this.placesService.createManualPlace(body);
+  async manual(
+    @Body() body: CreateManualPlaceDto,
+    @Headers("x-feca-places-origin") origin?: string,
+  ) {
+    const place = await this.placesService.createManualPlace(body, origin);
     return { place };
   }
 
@@ -35,8 +53,9 @@ export class PlacesController {
   async nearby(
     @CurrentUser() user: AccessTokenPayload,
     @Query() query: GetNearbyPlacesQueryDto,
+    @Headers("x-feca-places-origin") origin?: string,
   ) {
-    const places = await this.placesService.nearby(user.sub, query);
+    const places = await this.placesService.nearby(user.sub, query, origin);
     return { places };
   }
 
@@ -44,8 +63,13 @@ export class PlacesController {
   async getById(
     @CurrentUser() user: AccessTokenPayload,
     @Param("googlePlaceId") googlePlaceId: string,
+    @Headers("x-feca-places-origin") origin?: string,
   ) {
-    const place = await this.placesService.getPlaceProfile(user.sub, googlePlaceId);
+    const place = await this.placesService.getPlaceProfile(
+      user.sub,
+      googlePlaceId,
+      origin,
+    );
     return { place };
   }
 }

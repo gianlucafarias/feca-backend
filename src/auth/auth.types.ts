@@ -13,6 +13,7 @@ export type UpdateUserProfileInput = {
   cityGooglePlaceId?: string;
   displayName?: string;
   groupInvitePolicy?: "everyone" | "from_following_only";
+  pushEnabled?: boolean;
   lat?: number;
   lng?: number;
   username?: string;
@@ -43,6 +44,8 @@ export type AuthSessionPayload = {
     lat?: number;
     lng?: number;
     username: string;
+    groupInvitePolicy?: "everyone" | "from_following_only";
+    pushEnabled?: boolean;
     outingPreferences?: unknown;
   };
 };

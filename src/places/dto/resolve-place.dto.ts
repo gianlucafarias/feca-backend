@@ -1,4 +1,4 @@
-import { IsIn, IsString, MinLength } from "class-validator";
+import { IsIn, IsOptional, IsString, MinLength } from "class-validator";
 
 export class ResolvePlaceDto {
   @IsString()
@@ -8,5 +8,9 @@ export class ResolvePlaceDto {
   @IsString()
   @MinLength(1)
   sourcePlaceId!: string;
-}
 
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  sessionToken?: string;
+}

@@ -95,6 +95,11 @@ enum NotificationType {
   group_event_rsvp
   visit_created
   diary_published
+  group_invite_reminder
+  group_event_rsvp_reminder
+  group_event_today_reminder
+  weekly_digest
+  contextual_recommendation
 }
 
 enum NotificationEntityType {
@@ -103,6 +108,24 @@ enum NotificationEntityType {
   group_event
   visit
   diary
+  place
+}
+
+enum PushProvider {
+  expo
+}
+
+enum PushPlatform {
+  ios
+  android
+}
+
+enum PushDeliveryStatus {
+  pending
+  ticketed
+  delivered
+  failed
+  cancelled
 }
 
 model City {
@@ -155,6 +178,7 @@ model User {
   diaries            Diary[]          @relation("DiaryCreator")
   notifications      Notification[]   @relation("UserNotifications")
   notificationsSent  Notification[]   @relation("NotificationActor")
+  pushInstallations  PushInstallation[]
   /** Curadores: guías públicas pueden destacarse en inicio (según reglas de producto). */
   isEditor           Boolean          @default(false)
 
@@ -199,6 +223,7 @@ model UserSettings {
   activityVisibility ContentVisibility @default(public)
   diaryVisibility    ContentVisibility @default(public)
   groupInvitePolicy  GroupInvitePolicy @default(anyone)
+  pushEnabled        Boolean           @default(true)
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
   user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -397,15 +422,63 @@ model Notification {
   type       NotificationType
   entityType NotificationEntityType?
   entityId   String?
+  dedupeKey  String?
   payload    Json?
   readAt     DateTime?
   createdAt  DateTime                @default(now())
   updatedAt  DateTime                @updatedAt
   user       User                    @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
   actor      User?                   @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  pushDeliveries PushDelivery[]
 
   @@index([userId, createdAt(sort: Desc)])
   @@index([userId, readAt, createdAt(sort: Desc)])
   @@index([actorId, createdAt(sort: Desc)])
   @@index([type, createdAt(sort: Desc)])
+  @@unique([userId, dedupeKey])
+}
+
+model PushInstallation {
+  id             String       @id @default(cuid())
+  userId         String
+  provider       PushProvider
+  installationId String
+  token          String
+  platform       PushPlatform
+  timezone       String
+  lastSeenAt     DateTime     @default(now())
+  disabledAt     DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries     PushDelivery[]
+
+  @@unique([provider, installationId])
+  @@index([userId, lastSeenAt(sort: Desc)])
+  @@index([provider, token])
+  @@index([disabledAt, revokedAt, lastSeenAt(sort: Desc)])
+}
+
+model PushDelivery {
+  id             String             @id @default(cuid())
+  notificationId String
+  installationId String
+  status         PushDeliveryStatus @default(pending)
+  scheduledFor   DateTime           @default(now())
+  attemptCount   Int                @default(0)
+  expoTicketId   String?
+  lastError      String?
+  sentAt         DateTime?
+  deliveredAt    DateTime?
+  failedAt       DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  notification   Notification       @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  installation   PushInstallation   @relation(fields: [installationId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, installationId])
+  @@index([status, scheduledFor, createdAt(sort: Desc)])
+  @@index([expoTicketId])
+  @@index([installationId, createdAt(sort: Desc)])
 }

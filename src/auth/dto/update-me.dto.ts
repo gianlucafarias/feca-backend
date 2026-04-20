@@ -1,5 +1,6 @@
 import { Transform } from "class-transformer";
 import {
+  IsBoolean,
   IsIn,
   IsNumber,
   IsObject,
@@ -90,6 +91,10 @@ export class UpdateMeDto {
   @IsOptional()
   @IsIn(["everyone", "from_following_only"])
   groupInvitePolicy?: "everyone" | "from_following_only";
+
+  @IsOptional()
+  @IsBoolean()
+  pushEnabled?: boolean;
 
   @IsOptional()
   @ValidateIf((_, v) => v !== null && v !== undefined)

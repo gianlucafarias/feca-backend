@@ -67,7 +67,7 @@ export class SocialService {
     private readonly notificationsService: NotificationsService,
   ) {}
 
-  async getFeed(userId: string, query: FeedQueryDto) {
+  async getFeed(userId: string, query: FeedQueryDto, origin?: string) {
     const offset = resolveOffset(query);
     const viewerTasteIds =
       (await this.socialRepository.getUserTastePreferenceIds(userId))
@@ -79,6 +79,7 @@ export class SocialService {
         try {
           const city = await this.placesService.getOrCreateCityRecordByGooglePlaceId(
             query.cityGooglePlaceId,
+            origin,
           );
           cityIdOverride = city.id;
         } catch {
@@ -96,6 +97,7 @@ export class SocialService {
           const city = await this.placesService.getOrCreateCityRecordFromCoordinates(
             query.lat,
             query.lng,
+            origin,
           );
           cityIdOverride = city.id;
         } catch {
@@ -325,6 +327,11 @@ export class SocialService {
       ...(body.groupInvitePolicy !== undefined
         ? {
             groupInvitePolicy: mapApiGroupInvitePolicyToPrisma(body.groupInvitePolicy),
+          }
+        : {}),
+      ...(body.pushEnabled !== undefined
+        ? {
+            pushEnabled: body.pushEnabled,
           }
         : {}),
     });
@@ -966,7 +973,12 @@ export class SocialService {
     };
   }
 
-  async addPlaceToDiary(userId: string, diaryId: string, body: AddDiaryPlaceDto) {
+  async addPlaceToDiary(
+    userId: string,
+    diaryId: string,
+    body: AddDiaryPlaceDto,
+    origin?: string,
+  ) {
     const diary = await this.socialRepository.findDiaryById(diaryId);
     if (!diary) {
       throw new NotFoundException("Diary not found");
@@ -976,7 +988,7 @@ export class SocialService {
       throw new ForbiddenException("You cannot edit this diary");
     }
 
-    const place = await this.resolveWritablePlace(body);
+    const place = await this.resolveWritablePlace(body, origin);
     const updatedDiary = await this.socialRepository.addPlaceToDiary(
       diaryId,
       place.id,
@@ -1062,7 +1074,8 @@ export class SocialService {
   private async resolveWritablePlace(input: {
     googlePlaceId?: string;
     placeId?: string;
-  }) {
+    sessionToken?: string;
+  }, origin?: string) {
     if (input.placeId) {
       const place = await this.placesRepository.getPlaceById(input.placeId);
       if (place) {
@@ -1074,7 +1087,8 @@ export class SocialService {
       return this.placesService.resolve({
         source: "google",
         sourcePlaceId: input.googlePlaceId,
-      });
+        sessionToken: input.sessionToken,
+      }, origin);
     }
 
     throw new BadRequestException("placeId or googlePlaceId is required");

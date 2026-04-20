@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from "@nestjs/common";
+import { Controller, Get, Headers, Query, UseGuards } from "@nestjs/common";
 
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { AccessTokenGuard } from "../common/guards/access-token.guard";
@@ -15,7 +15,8 @@ export class FeedController {
   getFeed(
     @CurrentUser() user: AccessTokenPayload,
     @Query() query: FeedQueryDto,
+    @Headers("x-feca-places-origin") origin?: string,
   ) {
-    return this.socialService.getFeed(user.sub, query);
+    return this.socialService.getFeed(user.sub, query, origin);
   }
 }

@@ -87,7 +87,7 @@ type NotificationWithRelations = Notification & {
 
 type SocialSettingsView = Pick<
   UserSettings,
-  "activityVisibility" | "diaryVisibility" | "groupInvitePolicy"
+  "activityVisibility" | "diaryVisibility" | "groupInvitePolicy" | "pushEnabled"
 >;
 
 export function serializeUserSummary(
@@ -216,6 +216,7 @@ export function serializeSocialSettings(settings: SocialSettingsView) {
     activityVisibility: settings.activityVisibility,
     diaryVisibility: settings.diaryVisibility,
     groupInvitePolicy: mapGroupInvitePolicyToApi(settings.groupInvitePolicy),
+    pushEnabled: settings.pushEnabled,
   };
 }
 
@@ -609,6 +610,7 @@ function buildNotificationPresentation(
   entity: { id: string; kind: NotificationEntityType } | null,
 ) {
   const actorName = actor?.displayName || actor?.username || "Alguien";
+  const custom = readCustomNotificationPresentation(data);
 
   switch (type) {
     case "follow":
@@ -676,7 +678,73 @@ function buildNotificationPresentation(
         title: "Nueva guia publicada",
       };
     }
+    case "group_invite_reminder": {
+      const groupId = readNotificationString(data, "groupId") ?? entity?.id ?? null;
+      const groupName = readNotificationString(data, "groupName") ?? "tu plan";
+      return custom ?? {
+        body: `Todavia tenes pendiente la invitacion a ${groupName}`,
+        deepLink: groupId ? `/group/${groupId}` : null,
+        title: "Invitacion pendiente",
+      };
+    }
+    case "group_event_rsvp_reminder": {
+      const groupId = readNotificationString(data, "groupId") ?? null;
+      const placeName = readNotificationString(data, "placeName") ?? "tu plan";
+      return custom ?? {
+        body: `Falta tu respuesta para ${placeName}`,
+        deepLink: groupId ? `/group/${groupId}` : null,
+        title: "Recordatorio de RSVP",
+      };
+    }
+    case "group_event_today_reminder": {
+      const groupId = readNotificationString(data, "groupId") ?? null;
+      const placeName = readNotificationString(data, "placeName") ?? "tu plan";
+      return custom ?? {
+        body: `Tu plan de hoy sigue en pie: ${placeName}`,
+        deepLink: groupId ? `/group/${groupId}` : null,
+        title: "Plan para hoy",
+      };
+    }
+    case "weekly_digest":
+      return (
+        custom ?? {
+          body: "Mira lo mas interesante de tu red esta semana.",
+          deepLink: "/notifications",
+          title: "Resumen semanal",
+        }
+      );
+    case "contextual_recommendation": {
+      const placeRouteId =
+        readNotificationString(data, "placeGooglePlaceId") ??
+        readNotificationString(data, "placeId") ??
+        entity?.id ??
+        null;
+      const placeName = readNotificationString(data, "placeName") ?? "un lugar";
+      return custom ?? {
+        body: `Tenemos una recomendacion para tu proxima salida: ${placeName}`,
+        deepLink: placeRouteId ? `/place/${placeRouteId}` : null,
+        title: "Recomendacion para vos",
+      };
+    }
   }
+}
+
+function readCustomNotificationPresentation(
+  data: Record<string, unknown> | null,
+) {
+  const title = readNotificationString(data, "title");
+  const body = readNotificationString(data, "body");
+  const deepLink = readNotificationString(data, "deepLink") ?? null;
+
+  if (!title || !body) {
+    return null;
+  }
+
+  return {
+    body,
+    deepLink,
+    title,
+  };
 }
 
 function readNotificationString(

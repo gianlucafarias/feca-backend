@@ -99,6 +99,7 @@ export class AuthService {
           stats,
         ),
         groupInvitePolicy: mapGroupInvitePolicyToApi(socialSettings.groupInvitePolicy),
+        pushEnabled: socialSettings.pushEnabled,
       },
     };
   }
@@ -143,6 +144,7 @@ export class AuthService {
     try {
       const {
         groupInvitePolicy: _groupInvitePolicy,
+        pushEnabled: _pushEnabled,
         outingPreferences,
         ...profileInput
       } = input;
@@ -170,11 +172,18 @@ export class AuthService {
       );
 
       const [socialSettings, stats] = await Promise.all([
-        input.groupInvitePolicy !== undefined
+        input.groupInvitePolicy !== undefined || input.pushEnabled !== undefined
           ? this.socialRepository.updateSocialSettings(userId, {
-              groupInvitePolicy: mapApiGroupInvitePolicyToPrisma(
-                input.groupInvitePolicy,
-              ),
+              ...(input.groupInvitePolicy !== undefined
+                ? {
+                    groupInvitePolicy: mapApiGroupInvitePolicyToPrisma(
+                      input.groupInvitePolicy,
+                    ),
+                  }
+                : {}),
+              ...(input.pushEnabled !== undefined
+                ? { pushEnabled: input.pushEnabled }
+                : {}),
             })
           : this.socialRepository.getSocialSettings(userId),
         this.socialRepository.getProfileStats(userId),
@@ -189,6 +198,7 @@ export class AuthService {
             stats,
           ),
           groupInvitePolicy: mapGroupInvitePolicyToApi(socialSettings.groupInvitePolicy),
+          pushEnabled: socialSettings.pushEnabled,
         },
       };
     } catch (error) {
@@ -232,6 +242,7 @@ export class AuthService {
     });
 
     const hydratedUser = await this.authRepository.findUserByIdWithCity(user.id);
+    const socialSettings = await this.socialRepository.getSocialSettings(user.id);
 
     if (!hydratedUser) {
       throw new UnauthorizedException("User not found");
@@ -242,9 +253,15 @@ export class AuthService {
       accessTokenExpiresAt: accessTokenExpiresAt.toISOString(),
       refreshToken,
       refreshTokenExpiresAt: refreshTokenExpiresAt.toISOString(),
-      user: serializeAuthenticatedUser(hydratedUser, {
-        isAdmin: this.config.isFecaAdminEmail(hydratedUser.email),
-      }),
+      user: {
+        ...serializeAuthenticatedUser(hydratedUser, {
+          isAdmin: this.config.isFecaAdminEmail(hydratedUser.email),
+        }),
+        groupInvitePolicy: mapGroupInvitePolicyToApi(
+          socialSettings.groupInvitePolicy,
+        ),
+        pushEnabled: socialSettings.pushEnabled,
+      },
     };
   }
 

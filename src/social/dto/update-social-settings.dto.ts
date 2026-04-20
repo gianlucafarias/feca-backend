@@ -1,4 +1,4 @@
-import { IsEnum, IsIn, IsOptional } from "class-validator";
+import { IsBoolean, IsEnum, IsIn, IsOptional } from "class-validator";
 import { ContentVisibility } from "@prisma/client";
 
 export class UpdateSocialSettingsDto {
@@ -13,4 +13,8 @@ export class UpdateSocialSettingsDto {
   @IsOptional()
   @IsIn(["everyone", "from_following_only"])
   groupInvitePolicy?: "everyone" | "from_following_only";
+
+  @IsOptional()
+  @IsBoolean()
+  pushEnabled?: boolean;
 }

@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   Patch,
   Post,
@@ -61,7 +62,8 @@ export class DiariesController {
     @CurrentUser() user: AccessTokenPayload,
     @Param("id") diaryId: string,
     @Body() body: AddDiaryPlaceDto,
+    @Headers("x-feca-places-origin") origin?: string,
   ) {
-    return this.socialService.addPlaceToDiary(user.sub, diaryId, body);
+    return this.socialService.addPlaceToDiary(user.sub, diaryId, body, origin);
   }
 }

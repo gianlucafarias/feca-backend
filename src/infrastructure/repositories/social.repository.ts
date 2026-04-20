@@ -66,7 +66,7 @@ type UserPermissions = {
 
 type SocialSettingsView = Pick<
   UserSettings,
-  "activityVisibility" | "diaryVisibility" | "groupInvitePolicy"
+  "activityVisibility" | "diaryVisibility" | "groupInvitePolicy" | "pushEnabled"
 >;
 
 type UserWithSettings = Prisma.UserGetPayload<{
@@ -125,6 +125,7 @@ const DEFAULT_SOCIAL_SETTINGS: SocialSettingsView = {
   activityVisibility: ContentVisibility.public,
   diaryVisibility: ContentVisibility.public,
   groupInvitePolicy: GroupInvitePolicy.anyone,
+  pushEnabled: true,
 };
 
 @Injectable()
@@ -461,6 +462,9 @@ export class SocialRepository {
         ...(input.groupInvitePolicy !== undefined
           ? { groupInvitePolicy: input.groupInvitePolicy }
           : {}),
+        ...(input.pushEnabled !== undefined
+          ? { pushEnabled: input.pushEnabled }
+          : {}),
       },
       create: {
         activityVisibility:
@@ -469,6 +473,7 @@ export class SocialRepository {
           input.diaryVisibility ?? DEFAULT_SOCIAL_SETTINGS.diaryVisibility,
         groupInvitePolicy:
           input.groupInvitePolicy ?? DEFAULT_SOCIAL_SETTINGS.groupInvitePolicy,
+        pushEnabled: input.pushEnabled ?? DEFAULT_SOCIAL_SETTINGS.pushEnabled,
         userId,
       },
     });
@@ -2016,6 +2021,50 @@ export class SocialRepository {
     return rows.map((row) => row.followerId);
   }
 
+  async listRecentlyInteractedPlaceRouteIds(userId: string, since: Date) {
+    const [visits, saves] = await Promise.all([
+      this.prisma.visit.findMany({
+        where: {
+          createdAt: { gte: since },
+          userId,
+        },
+        select: {
+          place: {
+            select: {
+              id: true,
+              sourcePlaceId: true,
+            },
+          },
+        },
+      }),
+      this.prisma.placeSave.findMany({
+        where: {
+          createdAt: { gte: since },
+          userId,
+        },
+        select: {
+          place: {
+            select: {
+              id: true,
+              sourcePlaceId: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    const ids = new Set<string>();
+
+    for (const row of [...visits, ...saves]) {
+      if (row.place.sourcePlaceId) {
+        ids.add(row.place.sourcePlaceId);
+      }
+      ids.add(row.place.id);
+    }
+
+    return Array.from(ids);
+  }
+
   private async getViewerLocation(userId: string) {
     return this.getUserCoordinates(userId);
   }
@@ -2131,6 +2180,7 @@ function normalizeSettings(settings: UserSettings | null | undefined): SocialSet
       settings?.diaryVisibility ?? DEFAULT_SOCIAL_SETTINGS.diaryVisibility,
     groupInvitePolicy:
       settings?.groupInvitePolicy ?? DEFAULT_SOCIAL_SETTINGS.groupInvitePolicy,
+    pushEnabled: settings?.pushEnabled ?? DEFAULT_SOCIAL_SETTINGS.pushEnabled,
   };
 }
 

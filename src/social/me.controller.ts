@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -18,6 +19,7 @@ import { PatchMeEditorDto } from "../auth/dto/patch-me-editor.dto";
 import { UpdateSocialSettingsDto } from "./dto/update-social-settings.dto";
 import { ListNotificationsQueryDto } from "./dto/list-notifications.query.dto";
 import { UpdateTasteDto } from "./dto/update-taste.dto";
+import { UpsertPushTokenDto } from "./dto/upsert-push-token.dto";
 import { NotificationsService } from "./notifications.service";
 import { SocialService } from "./social.service";
 
@@ -67,6 +69,25 @@ export class MeController {
     return this.notificationsService.markMyNotificationRead(
       user.sub,
       notificationId,
+    );
+  }
+
+  @Post("push-tokens")
+  upsertMyPushToken(
+    @CurrentUser() user: AccessTokenPayload,
+    @Body() body: UpsertPushTokenDto,
+  ) {
+    return this.notificationsService.registerMyPushInstallation(user.sub, body);
+  }
+
+  @Delete("push-tokens/:installationId")
+  revokeMyPushToken(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param("installationId") installationId: string,
+  ) {
+    return this.notificationsService.revokeMyPushInstallation(
+      user.sub,
+      installationId,
     );
   }
 

@@ -73,6 +73,10 @@ const envSchema = z
     CORS_ALLOWED_ORIGINS: optionalStringSchema,
     /** Lista separada por comas; emails que pueden otorgarse rol editor (preview). */
     FECA_ADMIN_EMAILS: optionalStringSchema,
+    /** Secret compartido para disparar jobs internos de notificaciones. */
+    INTERNAL_NOTIFICATIONS_SECRET: optionalStringSchema,
+    /** Opcional: bearer token para Expo Push API. */
+    EXPO_ACCESS_TOKEN: optionalStringSchema,
     TRUST_PROXY: booleanLikeSchema.default(false),
   })
   .superRefine((env, ctx) => {
@@ -101,6 +105,14 @@ const envSchema = z
         code: z.ZodIssueCode.custom,
         message: "GOOGLE_OAUTH_WEB_CLIENT_ID must be replaced in production",
         path: ["GOOGLE_OAUTH_WEB_CLIENT_ID"],
+      });
+    }
+
+    if (!env.INTERNAL_NOTIFICATIONS_SECRET) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "INTERNAL_NOTIFICATIONS_SECRET is required in production",
+        path: ["INTERNAL_NOTIFICATIONS_SECRET"],
       });
     }
   });

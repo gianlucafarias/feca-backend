@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 
 import { AppConfigService } from "../../config/app-config.service";
 import type { NearbyFriendSocialRow } from "../../lib/nearby-network-chips";
@@ -9,6 +9,23 @@ const DEFAULT_NEARBY_TYPES = ["cafe", "restaurant"] as const;
 
 /** Places API (New): maxResultCount / pageSize deben estar entre 1 y 20. */
 const GOOGLE_PLACES_MAX_RESULTS = 20;
+
+export type GooglePlacesMethod =
+  | "autocomplete"
+  | "autocompleteCities"
+  | "searchText"
+  | "nearbySearch"
+  | "getPlaceDetails"
+  | "getPlaceDetailView"
+  | "getCityByPlaceId"
+  | "reverseGeocodeCity";
+
+export type GoogleTraceContext = {
+  origin?: string;
+  key?: string;
+  cache?: "hit" | "miss" | "miss_joined" | "skip";
+  singleFlight?: "leader" | "joined";
+};
 
 function clampGooglePlacesResultCount(limit: number): number {
   const n = Number.isFinite(limit) ? Math.floor(limit) : 1;
@@ -185,13 +202,15 @@ type NearbyParams = {
 
 @Injectable()
 export class GooglePlacesClient {
+  private readonly logger = new Logger(GooglePlacesClient.name);
+
   constructor(private readonly config: AppConfigService) {}
 
   get isEnabled() {
     return Boolean(this.config.googleMapsApiKey);
   }
 
-  async autocomplete(params: AutocompleteParams) {
+  async autocomplete(params: AutocompleteParams, trace?: GoogleTraceContext) {
     this.assertEnabled();
 
     const body: Record<string, unknown> = {
@@ -238,6 +257,10 @@ export class GooglePlacesClient {
         ),
         body: JSON.stringify(body),
       },
+      {
+        method: "autocomplete",
+        trace,
+      },
     );
 
     return (response.suggestions ?? [])
@@ -262,6 +285,7 @@ export class GooglePlacesClient {
 
   async autocompleteCities(
     params: CityAutocompleteParams,
+    trace?: GoogleTraceContext,
   ): Promise<GoogleCitySummary[]> {
     this.assertEnabled();
 
@@ -306,6 +330,10 @@ export class GooglePlacesClient {
         ),
         body: JSON.stringify(body),
       },
+      {
+        method: "autocompleteCities",
+        trace,
+      },
     );
 
     const deduped = new Map<string, GoogleCitySummary>();
@@ -336,7 +364,10 @@ export class GooglePlacesClient {
     return Array.from(deduped.values());
   }
 
-  async searchText(params: SearchTextParams): Promise<GooglePlaceSummary[]> {
+  async searchText(
+    params: SearchTextParams,
+    trace?: GoogleTraceContext,
+  ): Promise<GooglePlaceSummary[]> {
     this.assertEnabled();
 
     const pageSize = clampGooglePlacesResultCount(params.limit);
@@ -383,12 +414,19 @@ export class GooglePlacesClient {
         ),
         body: JSON.stringify(body),
       },
+      {
+        method: "searchText",
+        trace,
+      },
     );
 
     return (response.places ?? []).map((place) => this.mapPlaceSummary(place));
   }
 
-  async nearbySearch(params: NearbyParams): Promise<GooglePlaceSummary[]> {
+  async nearbySearch(
+    params: NearbyParams,
+    trace?: GoogleTraceContext,
+  ): Promise<GooglePlaceSummary[]> {
     this.assertEnabled();
 
     const includedTypes = params.type ? [params.type] : [...DEFAULT_NEARBY_TYPES];
@@ -429,16 +467,31 @@ export class GooglePlacesClient {
           },
         }),
       },
+      {
+        method: "nearbySearch",
+        trace,
+      },
     );
 
     return (response.places ?? []).map((place) => this.mapPlaceSummary(place));
   }
 
-  async getPlaceDetails(placeId: string) {
+  async getPlaceDetails(
+    placeId: string,
+    options?: {
+      sessionToken?: string;
+      trace?: GoogleTraceContext;
+    },
+  ) {
     this.assertEnabled();
 
+    const url = new URL(`${GOOGLE_BASE_URL}/places/${placeId}`);
+    if (options?.sessionToken) {
+      url.searchParams.set("sessionToken", options.sessionToken);
+    }
+
     const place = await this.fetchJson<GooglePlace>(
-      `${GOOGLE_BASE_URL}/places/${placeId}`,
+      url.toString(),
       {
         headers: this.createHeaders(
           [
@@ -458,6 +511,10 @@ export class GooglePlacesClient {
             "photos",
           ].join(","),
         ),
+      },
+      {
+        method: "getPlaceDetails",
+        trace: options?.trace,
       },
     );
 
@@ -487,7 +544,10 @@ export class GooglePlacesClient {
     };
   }
 
-  async getCityByPlaceId(placeId: string): Promise<GoogleCitySummary> {
+  async getCityByPlaceId(
+    placeId: string,
+    trace?: GoogleTraceContext,
+  ): Promise<GoogleCitySummary> {
     this.assertEnabled();
 
     const url = new URL(GOOGLE_GEOCODING_URL);
@@ -495,7 +555,10 @@ export class GooglePlacesClient {
     url.searchParams.set("language", this.config.googlePlacesLanguage);
     url.searchParams.set("key", this.config.googleMapsApiKey!);
 
-    const response = await this.fetchGeocodeJson(url.toString());
+    const response = await this.fetchGeocodeJson(url.toString(), {
+      method: "getCityByPlaceId",
+      trace,
+    });
     const result = pickBestCityGeocodeResult(response.results ?? []);
     const city = result ? this.mapGeocodeResultToCity(result) : null;
 
@@ -509,6 +572,7 @@ export class GooglePlacesClient {
   async reverseGeocodeCity(
     lat: number,
     lng: number,
+    trace?: GoogleTraceContext,
   ): Promise<GoogleCitySummary | null> {
     this.assertEnabled();
 
@@ -517,13 +581,19 @@ export class GooglePlacesClient {
     url.searchParams.set("language", this.config.googlePlacesLanguage);
     url.searchParams.set("key", this.config.googleMapsApiKey!);
 
-    const response = await this.fetchGeocodeJson(url.toString());
+    const response = await this.fetchGeocodeJson(url.toString(), {
+      method: "reverseGeocodeCity",
+      trace,
+    });
     const result = pickBestCityGeocodeResult(response.results ?? []);
 
     return result ? this.mapGeocodeResultToCity(result) : null;
   }
 
-  async getPlaceDetailView(placeId: string): Promise<GooglePlaceDetailView> {
+  async getPlaceDetailView(
+    placeId: string,
+    trace?: GoogleTraceContext,
+  ): Promise<GooglePlaceDetailView> {
     this.assertEnabled();
 
     const place = await this.fetchJson<GooglePlace>(
@@ -546,6 +616,10 @@ export class GooglePlacesClient {
             "reviews",
           ].join(","),
         ),
+      },
+      {
+        method: "getPlaceDetailView",
+        trace,
       },
     );
 
@@ -606,33 +680,95 @@ export class GooglePlacesClient {
     return url.toString();
   }
 
-  private async fetchJson<T>(input: string, init?: RequestInit) {
+  traceCacheEvent(input: {
+    method: GooglePlacesMethod;
+    trace?: GoogleTraceContext;
+    durationMs?: number;
+    status?: "ok" | "error";
+    message?: string;
+  }) {
+    this.logger.log(
+      JSON.stringify({
+        tag: "google_places",
+        method: input.method,
+        origin: normalizeTraceText(input.trace?.origin),
+        cache: normalizeTraceText(input.trace?.cache),
+        key: normalizeTraceText(input.trace?.key),
+        singleFlight: normalizeTraceText(input.trace?.singleFlight),
+        durationMs: input.durationMs ?? 0,
+        status: input.status ?? "ok",
+        ...(input.message ? { message: input.message } : {}),
+      }),
+    );
+  }
+
+  private async fetchJson<T>(
+    input: string,
+    init?: RequestInit,
+    meta?: { method: GooglePlacesMethod; trace?: GoogleTraceContext },
+  ) {
+    const startedAt = Date.now();
     const response = await fetch(input, init);
 
     if (!response.ok) {
       const text = await response.text();
+      this.traceCacheEvent({
+        method: meta?.method ?? "getPlaceDetails",
+        trace: meta?.trace,
+        durationMs: Date.now() - startedAt,
+        status: "error",
+        message: `HTTP ${response.status}`,
+      });
       throw new Error(`Google Places request failed: ${response.status} ${text}`);
     }
 
+    this.traceCacheEvent({
+      method: meta?.method ?? "getPlaceDetails",
+      trace: meta?.trace,
+      durationMs: Date.now() - startedAt,
+    });
     return (await response.json()) as T;
   }
 
-  private async fetchGeocodeJson(input: string) {
+  private async fetchGeocodeJson(
+    input: string,
+    meta?: { method: GooglePlacesMethod; trace?: GoogleTraceContext },
+  ) {
+    const startedAt = Date.now();
     const response = await fetch(input);
 
     if (!response.ok) {
       const text = await response.text();
+      this.traceCacheEvent({
+        method: meta?.method ?? "reverseGeocodeCity",
+        trace: meta?.trace,
+        durationMs: Date.now() - startedAt,
+        status: "error",
+        message: `HTTP ${response.status}`,
+      });
       throw new Error(`Google geocoding request failed: ${response.status} ${text}`);
     }
 
     const payload = (await response.json()) as GoogleGeocodeResponse;
 
     if (payload.status && payload.status !== "OK" && payload.status !== "ZERO_RESULTS") {
+      this.traceCacheEvent({
+        method: meta?.method ?? "reverseGeocodeCity",
+        trace: meta?.trace,
+        durationMs: Date.now() - startedAt,
+        status: "error",
+        message: payload.status,
+      });
       throw new Error(
         `Google geocoding request failed: ${payload.status} ${payload.error_message ?? ""}`.trim(),
       );
     }
 
+    this.traceCacheEvent({
+      method: meta?.method ?? "reverseGeocodeCity",
+      trace: meta?.trace,
+      durationMs: Date.now() - startedAt,
+    });
     return payload;
   }
 
@@ -681,6 +817,10 @@ export class GooglePlacesClient {
     const chunks = address.split(",").map((item) => item.trim()).filter(Boolean);
     return chunks.length >= 2 ? chunks[chunks.length - 2] : chunks[0] ?? "";
   }
+}
+
+function normalizeTraceText(value?: string) {
+  return value?.trim() || undefined;
 }
 
 function extractText(value?: GoogleTextValue) {

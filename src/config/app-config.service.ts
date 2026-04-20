@@ -92,6 +92,16 @@ export class AppConfigService {
     return this.configService.get("TRUST_PROXY", { infer: true });
   }
 
+  get internalNotificationsSecret() {
+    return this.configService.get("INTERNAL_NOTIFICATIONS_SECRET", {
+      infer: true,
+    });
+  }
+
+  get expoAccessToken() {
+    return this.configService.get("EXPO_ACCESS_TOKEN", { infer: true });
+  }
+
   /**
    * Emails de administradores de producto (comparación case-insensitive).
    * Vacío si `FECA_ADMIN_EMAILS` no está definido.
