@@ -6,12 +6,14 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from "@nestjs/common";
-import PgBoss from "pg-boss";
+import PgBoss = require("pg-boss");
 
 import { AppConfigService } from "../../config/app-config.service";
 import type { EnqueueOptions, QueueJobName } from "./queue.types";
 
 type JobHandler = (payload: unknown) => Promise<void>;
+
+type PgBossClient = InstanceType<typeof PgBoss>;
 
 type RegisteredWorker = {
   handler: JobHandler;
@@ -22,7 +24,7 @@ type RegisteredWorker = {
 export class QueueService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(QueueService.name);
   private readonly workers: RegisteredWorker[] = [];
-  private boss: PgBoss | null = null;
+  private boss: PgBossClient | null = null;
   private started = false;
   private workerIds: string[] = [];
 
