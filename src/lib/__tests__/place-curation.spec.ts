@@ -11,6 +11,6 @@ describe("place-curation constants", () => {
   });
 
   it("caps visible badges to avoid saturation", () => {
-    expect(MAX_VISIBLE_RECOMMENDED_BADGES).toBe(2);
+    expect(MAX_VISIBLE_RECOMMENDED_BADGES).toBe(3);
   });
 });
