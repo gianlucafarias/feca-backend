@@ -83,21 +83,21 @@ export function scorePlacePrioritiesAgainstPlace(
   let score = 0;
 
   if (top2.has("food_drink") && hasType("restaurant", "cafe", "bakery", "bar")) {
-    score += 12;
+    score += 18;
   }
   if (top2.has("atmosphere") && (place.rating ?? 0) >= 4.3) {
-    score += 10;
+    score += 16;
   }
   if (top2.has("quiet") && hasType("cafe", "library", "book")) {
-    score += 8;
+    score += 14;
   }
   if (top2.has("service") && (place.userRatingCount ?? 0) >= 50) {
-    score += 6;
+    score += 10;
   }
   if (top2.has("distance") && distanceMeters < 800) {
-    score += 10;
+    score += 16;
   } else if (top2.has("distance") && distanceMeters < 1500) {
-    score += 5;
+    score += 8;
   }
 
   return score;
@@ -130,9 +130,19 @@ export function scoreGoogleQualityPenalty(place: GooglePlaceSummary) {
   return 0;
 }
 
-export const ADMIN_BOOST_CAP = 30;
+export const ADMIN_BOOST_CAP = 45;
 export const MAX_FORCED_CITY_PICKS = 2;
 /** Máx lugares con curación activa en el top del carrusel home (anti-repetición). */
-export const MAX_CURATED_SLOTS_IN_TOP = 3;
-export const LIKED_VISIT_AFFINITY_BOOST = 22;
-export const SIMILAR_TO_LIKED_BOOST = 14;
+export const MAX_CURATED_SLOTS_IN_TOP = 5;
+export const LIKED_VISIT_AFFINITY_BOOST = 30;
+export const SIMILAR_TO_LIKED_BOOST = 20;
+
+export function scaleAdminBoostScore(boostScore: number) {
+  if (boostScore <= 0) {
+    return 0;
+  }
+  return Math.min(
+    ADMIN_BOOST_CAP,
+    Math.round(boostScore * (ADMIN_BOOST_CAP / 100)),
+  );
+}

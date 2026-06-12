@@ -198,6 +198,20 @@ describe("rankNearbyPlaceResults", () => {
     expect(keys).toContain("cafe");
   });
 
+  it("pins high-boost curated places in home mix", () => {
+    const places = [place("1"), place("2"), place("3")];
+    const result = rankNearbyPlaceResults(
+      "user-1",
+      { lat: -34.901, lng: -56.164, limit: 2, variant: "home_nearby" },
+      places,
+      baseContext({
+        adminBoostByGoogleId: new Map([["3", 80]]),
+        curatedGoogleIds: new Set(["3"]),
+      }),
+    );
+    expect(result.places.some((p) => p.googlePlaceId === "3")).toBe(true);
+  });
+
   it("fills non-curated slots after reaching the curated cap", () => {
     const places = [
       place("1"),

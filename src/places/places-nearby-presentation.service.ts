@@ -24,6 +24,9 @@ export class PlacesNearbyPresentationService {
 
   getNearbyPhotoLimit() {
     if (!this.googleCache.shouldIncludeNearbyPhotos()) {
+      if (this.googleCache.shouldServeStoredNearbyPhotos()) {
+        return 999;
+      }
       return 0;
     }
 
@@ -82,6 +85,8 @@ export class PlacesNearbyPresentationService {
       );
       const { openingWeekdayLines: _weekdayLines, ...rest } = place;
       const keepPhoto =
+        (this.googleCache.shouldServeStoredNearbyPhotos() &&
+          Boolean(place.photoUrl)) ||
         index < photoLimit ||
         preloaded?.priorityPhotoGoogleIds?.has(place.googlePlaceId) === true;
       const view: NearbyPlaceView = {

@@ -6,6 +6,7 @@ import {
   distanceScoreMultiplier,
   isHomeCarouselVariant,
   parsePlacePriorities,
+  scaleAdminBoostScore,
   scoreGoogleQualityPenalty,
   scorePlacePrioritiesAgainstPlace,
   shouldExcludeLowQualityGooglePlace,
@@ -52,6 +53,14 @@ describe("parsePlacePriorities", () => {
   });
 });
 
+describe("scaleAdminBoostScore", () => {
+  it("scales boost score 0-100 into ranking points", () => {
+    expect(scaleAdminBoostScore(0)).toBe(0);
+    expect(scaleAdminBoostScore(100)).toBe(45);
+    expect(scaleAdminBoostScore(50)).toBe(23);
+  });
+});
+
 describe("score multipliers", () => {
   it("boosts taste when atmosphere or quiet are top priorities", () => {
     expect(tasteScoreMultiplier(["atmosphere"])).toBe(1.35);
@@ -95,13 +104,13 @@ describe("scorePlacePrioritiesAgainstPlace", () => {
       place({ types: ["cafe"], rating: 4.5, userRatingCount: 60 }),
       700,
     );
-    expect(score).toBeGreaterThan(20);
+    expect(score).toBeGreaterThan(40);
   });
 
   it("scores mid-range distance priority separately", () => {
     expect(
       scorePlacePrioritiesAgainstPlace(["distance"], place(), 1200),
-    ).toBe(5);
+    ).toBe(8);
     expect(
       scorePlacePrioritiesAgainstPlace(["distance"], place(), 2000),
     ).toBe(0);

@@ -107,7 +107,9 @@ export class PlacesNearbyPoolService {
         continue;
       }
       const inGooglePool = byId.has(googlePlaceId);
-      if (!row.isCityPick && !inGooglePool) {
+      const shouldInject =
+        row.isCityPick || row.boostScore > 0 || row.showRecommendedBadge;
+      if (!shouldInject && !inGooglePool) {
         continue;
       }
       if (

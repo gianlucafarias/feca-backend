@@ -49,6 +49,10 @@ export class PlacesGoogleCacheService {
     );
   }
 
+  shouldServeStoredNearbyPhotos() {
+    return this.config.googlePlacesLocalOnly;
+  }
+
   buildStoredCityCacheKey(cityGooglePlaceId: string) {
     return `places:city:place:${cityGooglePlaceId}`;
   }

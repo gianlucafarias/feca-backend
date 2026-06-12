@@ -6,13 +6,13 @@ import { rankCandidatesWithRotation } from "./dynamic-ranking";
 import { distanceInMeters } from "./geo";
 import { scoreOutingAgainstIntent } from "./outing-preferences";
 import {
-  ADMIN_BOOST_CAP,
   buildNearbyPlaceScore,
   isHomeCarouselVariant,
   LIKED_VISIT_AFFINITY_BOOST,
   MAX_CURATED_SLOTS_IN_TOP,
   MAX_FORCED_CITY_PICKS,
   parsePlacePriorities,
+  scaleAdminBoostScore,
   scoreGoogleQualityPenalty,
   scorePlacePrioritiesAgainstPlace,
   shouldExcludeLowQualityGooglePlace,
@@ -174,6 +174,42 @@ function isSimilarToLikedCategories(
   );
 }
 
+function buildPinnedCurationPlaces(
+  cityPicks: GooglePlaceSummary[],
+  candidates: GooglePlaceSummary[],
+  adminBoostByGoogleId: Map<string, number>,
+) {
+  const pinned: GooglePlaceSummary[] = [];
+  const pinnedIds = new Set<string>();
+
+  for (const place of cityPicks) {
+    if (pinned.length >= MAX_FORCED_CITY_PICKS) {
+      break;
+    }
+    if (pinnedIds.has(place.googlePlaceId)) {
+      continue;
+    }
+    pinned.push(place);
+    pinnedIds.add(place.googlePlaceId);
+  }
+
+  for (const place of candidates) {
+    if (pinned.length >= MAX_FORCED_CITY_PICKS) {
+      break;
+    }
+    if (pinnedIds.has(place.googlePlaceId)) {
+      continue;
+    }
+    const boost = adminBoostByGoogleId.get(place.googlePlaceId) ?? 0;
+    if (boost >= 65) {
+      pinned.push(place);
+      pinnedIds.add(place.googlePlaceId);
+    }
+  }
+
+  return pinned;
+}
+
 function applyCityPickSlots(
   ranked: GooglePlaceSummary[],
   cityPicks: GooglePlaceSummary[],
@@ -259,6 +295,12 @@ export function rankNearbyPlaceResults(
       onboardingPast);
   const placePriorities = parsePlacePriorities(context.outingPreferences);
   const tasteMultiplier = tasteScoreMultiplier(placePriorities);
+  const hasPersonalization =
+    context.tastePreferenceIds.length > 0 ||
+    (placePriorities?.length ?? 0) > 0 ||
+    context.likedVisitedPlaceCategoryIds.length > 0 ||
+    context.likedNearbyGooglePlaceIds.size > 0 ||
+    context.importedPlaceCategoryIds.length > 0;
   const scoringIntent =
     context.explicitExploreIntent ?? context.inferredIntent;
 
@@ -304,13 +346,17 @@ export function rankNearbyPlaceResults(
         context.importedPlaceCategoryIds,
         place.types ?? [],
       );
-      const visitedAffinity = scoreCategoryAffinityAgainstPlace(
-        context.likedVisitedPlaceCategoryIds,
-        place.types ?? [],
+      const visitedAffinity = Math.round(
+        scoreCategoryAffinityAgainstPlace(
+          context.likedVisitedPlaceCategoryIds,
+          place.types ?? [],
+        ) * 1.5,
       );
-      const visitedPenalty = scoreCategoryAffinityAgainstPlace(
-        context.dislikedVisitedPlaceCategoryIds,
-        place.types ?? [],
+      const visitedPenalty = Math.round(
+        scoreCategoryAffinityAgainstPlace(
+          context.dislikedVisitedPlaceCategoryIds,
+          place.types ?? [],
+        ) * 1.6,
       );
       const outing = Math.round(
         scoreOutingAgainstIntent(scoringIntent, context.outingPreferences) *
@@ -329,8 +375,7 @@ export function rankNearbyPlaceResults(
         : variant === "home_nearby" || variant === "home_open_now"
           ? Math.min(18, Math.round(rawBoost * 0.35))
           : 0;
-      const adminBoost = Math.min(
-        ADMIN_BOOST_CAP,
+      const adminBoost = scaleAdminBoostScore(
         context.adminBoostByGoogleId.get(place.googlePlaceId) ?? 0,
       );
       const likedVisit = context.likedNearbyGooglePlaceIds.has(
@@ -349,7 +394,7 @@ export function rankNearbyPlaceResults(
 
       const distanceBase = context.explicitExploreIntent
         ? scoreExploreIntent(context.explicitExploreIntent, place, distance)
-        : buildNearbyPlaceScore(input, place, index, placePriorities);
+        : buildNearbyPlaceScore(input, place, 0, placePriorities);
 
       const baseScore =
         distanceBase +
@@ -390,8 +435,8 @@ export function rankNearbyPlaceResults(
     }),
     {
       bucketHours: 1,
-      jitterRatio: homeMix ? 0.06 : 0.14,
-      maxJitter: homeMix ? 8 : 18,
+      jitterRatio: homeMix ? (hasPersonalization ? 0.02 : 0.05) : 0.12,
+      maxJitter: homeMix ? (hasPersonalization ? 3 : 6) : 14,
       seed: buildPlacesRankingSeed(
         userId,
         "nearby",
@@ -409,9 +454,17 @@ export function rankNearbyPlaceResults(
   const diversified = homeMix
     ? diversifyTopPlacesByCategory(ordered, input.limit)
     : ordered.slice(0, input.limit);
+  const pinnedCurationPlaces =
+    homeMix && !onboardingPast
+      ? buildPinnedCurationPlaces(
+          context.cityPickPlaces,
+          work,
+          context.adminBoostByGoogleId,
+        )
+      : [];
   const withCityPicks =
     homeMix && !onboardingPast
-      ? applyCityPickSlots(diversified, context.cityPickPlaces, input.limit)
+      ? applyCityPickSlots(diversified, pinnedCurationPlaces, input.limit)
       : diversified;
   const finalPlaces = homeMix
     ? applyCuratedSlotCap(
