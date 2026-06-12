@@ -4,6 +4,8 @@ import { Prisma } from "@prisma/client";
 import { AppConfigService } from "../config/app-config.service";
 import { PrismaService } from "../database/prisma.service";
 import { serializeNotification } from "../lib/api-presenters";
+import { QueueService } from "../infrastructure/queue/queue.service";
+import { QUEUE_JOBS } from "../infrastructure/queue/queue.types";
 
 const EXPO_PUSH_SEND_URL = "https://exp.host/--/api/v2/push/send";
 const EXPO_PUSH_RECEIPTS_URL = "https://exp.host/--/api/v2/push/getReceipts";
@@ -80,7 +82,16 @@ export class PushDispatchService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: AppConfigService,
+    private readonly queueService: QueueService,
   ) {}
+
+  scheduleDispatch(limit = 100) {
+    return this.queueService.enqueue(
+      QUEUE_JOBS.PUSH_DISPATCH,
+      { limit },
+      { singletonKey: "push-dispatch" },
+    );
+  }
 
   async dispatchPending(limit = 100) {
     const deliveries = await this.prisma.pushDelivery.findMany({

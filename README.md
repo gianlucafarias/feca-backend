@@ -16,6 +16,11 @@ NestJS backend for FECA's mobile app, including places, visits, saves, feed, fol
 
 - [Mobile API spec](./docs/mobile-api-spec.md)
 - [Social graph](./docs/social-graph.md)
+- [Production readiness](./docs/production-readiness.md)
+- [Architecture notes](./docs/architecture.md)
+- [Observability](./docs/observability.md)
+- [Cache and Redis](./docs/cache-and-redis.md)
+- [Testing](./docs/testing.md)
 - [Railway production](./docs/railway-production.md)
 - [Oracle Cloud deployment](./docs/oracle-cloud-deployment.md)
 
@@ -49,6 +54,12 @@ NestJS backend for FECA's mobile app, including places, visits, saves, feed, fol
 
    ```bash
    npm run start:dev
+   ```
+
+6. Run tests:
+
+   ```bash
+   npm run test
    ```
 
 ## Google auth env

@@ -1,0 +1,4 @@
+export const RAW_GOOGLE_CANDIDATES_TTL_MS = 60 * 60 * 1000;
+export const AUTOCOMPLETE_CITIES_TTL_MS = 60 * 1000;
+export const PLACE_DETAIL_TTL_MS = 60 * 60 * 1000;
+export const CITY_LOOKUP_TTL_MS = 24 * 60 * 60 * 1000;

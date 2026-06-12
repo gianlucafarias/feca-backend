@@ -1,14 +1,14 @@
 import "reflect-metadata";
 
-import {
-  Logger,
-  UnprocessableEntityException,
-  ValidationPipe,
-} from "@nestjs/common";
+import { UnprocessableEntityException, ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 
 import { AppModule } from "./app.module";
-import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
+import {
+  shouldUseStructuredLogger,
+  StructuredLogger,
+  writeStructuredLog,
+} from "./common/logging/structured-logger";
 import { AppConfigService } from "./config/app-config.service";
 
 function createCorsOriginMatcher(allowedOrigins: string[]) {
@@ -35,6 +35,10 @@ async function bootstrap() {
 
   const config = app.get(AppConfigService);
 
+  if (shouldUseStructuredLogger(config.nodeEnv)) {
+    app.useLogger(new StructuredLogger());
+  }
+
   if (config.trustProxy) {
     app.getHttpAdapter().getInstance().set("trust proxy", 1);
   }
@@ -57,11 +61,13 @@ async function bootstrap() {
       },
     }),
   );
-  app.useGlobalFilters(new AllExceptionsFilter());
 
   await app.listen(config.port);
 
-  new Logger("Bootstrap").log(`FECA backend listening on port ${config.port}`);
+  writeStructuredLog("info", "feca_backend_started", {
+    port: config.port,
+    nodeEnv: config.nodeEnv,
+  });
 }
 
 void bootstrap();

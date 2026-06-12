@@ -58,6 +58,9 @@ const envSchema = z
       .default(30),
     GOOGLE_MAPS_API_KEY: z.string().trim().min(1),
     GOOGLE_OAUTH_WEB_CLIENT_ID: z.string().trim().min(1),
+    GOOGLE_DATA_PORTABILITY_CLIENT_ID: optionalStringSchema,
+    GOOGLE_DATA_PORTABILITY_CLIENT_SECRET: optionalStringSchema,
+    GOOGLE_DATA_PORTABILITY_REDIRECT_URI: optionalStringSchema,
     GOOGLE_PLACES_COUNTRY: z.string().trim().length(2).default("uy"),
     GOOGLE_PLACES_LANGUAGE: z.string().trim().default("es"),
     GOOGLE_PLACES_RADIUS_METERS: z.coerce
@@ -66,6 +69,15 @@ const envSchema = z
       .min(100)
       .max(50000)
       .default(5000),
+    GOOGLE_PLACES_LOCAL_ONLY: booleanLikeSchema.default(false),
+    GOOGLE_PLACE_PHOTOS_HOME_ENABLED: booleanLikeSchema.default(false),
+    GOOGLE_PLACE_PHOTOS_HOME_LIMIT: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(20)
+      .default(6),
+    GOOGLE_PLACE_PHOTOS_DETAIL_ENABLED: booleanLikeSchema.default(true),
     CACHE_TTL_MS: z.coerce.number().int().positive().default(300000),
     CACHE_MAX_ITEMS: z.coerce.number().int().positive().default(500),
     RATE_LIMIT_TTL: z.coerce.number().int().positive().default(60000),
@@ -78,6 +90,9 @@ const envSchema = z
     /** Opcional: bearer token para Expo Push API. */
     EXPO_ACCESS_TOKEN: optionalStringSchema,
     TRUST_PROXY: booleanLikeSchema.default(false),
+    REDIS_URL: optionalStringSchema,
+    /** `in-process` (default dev/test) or `pg-boss` (default production). */
+    QUEUE_BACKEND: z.enum(["in-process", "pg-boss"]).optional(),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV !== "production") {
@@ -105,6 +120,29 @@ const envSchema = z
         code: z.ZodIssueCode.custom,
         message: "GOOGLE_OAUTH_WEB_CLIENT_ID must be replaced in production",
         path: ["GOOGLE_OAUTH_WEB_CLIENT_ID"],
+      });
+    }
+
+    if (
+      env.GOOGLE_DATA_PORTABILITY_CLIENT_ID &&
+      looksLikePlaceholder(env.GOOGLE_DATA_PORTABILITY_CLIENT_ID)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "GOOGLE_DATA_PORTABILITY_CLIENT_ID must be replaced in production",
+        path: ["GOOGLE_DATA_PORTABILITY_CLIENT_ID"],
+      });
+    }
+
+    if (
+      env.GOOGLE_DATA_PORTABILITY_CLIENT_SECRET &&
+      looksLikePlaceholder(env.GOOGLE_DATA_PORTABILITY_CLIENT_SECRET)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "GOOGLE_DATA_PORTABILITY_CLIENT_SECRET must be replaced in production",
+        path: ["GOOGLE_DATA_PORTABILITY_CLIENT_SECRET"],
       });
     }
 

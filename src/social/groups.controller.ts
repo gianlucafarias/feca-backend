@@ -8,6 +8,7 @@ import {
   Post,
   UseGuards,
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { AccessTokenGuard } from "../common/guards/access-token.guard";
@@ -77,6 +78,7 @@ export class GroupsController {
   }
 
   @Post(":id/events")
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   addGroupEvent(
     @CurrentUser() user: AccessTokenPayload,
     @Param("id") groupId: string,

@@ -94,7 +94,7 @@ export class AuthService {
       user: {
         ...mergeSerializedUserStats(
           serializeAuthenticatedUser(user, {
-            isAdmin: this.config.isFecaAdminEmail(user.email),
+            isAdmin: this.config.isFecaAdminUser(user),
           }),
           stats,
         ),
@@ -106,6 +106,11 @@ export class AuthService {
 
   async setMyEditorFlag(userId: string, isEditor: boolean) {
     await this.authRepository.updateUserIsEditor(userId, isEditor);
+    return this.getMe(userId);
+  }
+
+  async setMyAdminFlag(userId: string, isAdmin: boolean) {
+    await this.authRepository.updateUserIsAdminOverride(userId, isAdmin);
     return this.getMe(userId);
   }
 
@@ -193,7 +198,7 @@ export class AuthService {
         user: {
           ...mergeSerializedUserStats(
             serializeAuthenticatedUser(updatedUser, {
-              isAdmin: this.config.isFecaAdminEmail(updatedUser.email),
+              isAdmin: this.config.isFecaAdminUser(updatedUser),
             }),
             stats,
           ),
@@ -255,7 +260,7 @@ export class AuthService {
       refreshTokenExpiresAt: refreshTokenExpiresAt.toISOString(),
       user: {
         ...serializeAuthenticatedUser(hydratedUser, {
-          isAdmin: this.config.isFecaAdminEmail(hydratedUser.email),
+          isAdmin: this.config.isFecaAdminUser(hydratedUser),
         }),
         groupInvitePolicy: mapGroupInvitePolicyToApi(
           socialSettings.groupInvitePolicy,
@@ -267,6 +272,15 @@ export class AuthService {
 
   private async resolveCityId(cityGooglePlaceId: string) {
     try {
+      if (this.config.googlePlacesLocalOnly) {
+        const existing =
+          await this.citiesRepository.findCityByGooglePlaceId(cityGooglePlaceId);
+        if (!existing) {
+          throw new Error("City not found in local-only places mode");
+        }
+        return existing.id;
+      }
+
       const city = await this.googlePlacesClient.getCityByPlaceId(cityGooglePlaceId);
       const storedCity = await this.citiesRepository.upsertCity({
         displayName: city.displayName,

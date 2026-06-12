@@ -123,6 +123,7 @@ export type GooglePlaceSummary = {
   address: string;
   lat: number;
   lng: number;
+  googleMapsUri?: string;
   rating?: number;
   userRatingCount?: number;
   types: string[];
@@ -147,6 +148,8 @@ export type NearbyPlaceView = Omit<GooglePlaceSummary, "openingWeekdayLines"> & 
    * (p. ej. "Lo visitaste hace un mes"). Lo arma el backend en nearby/explore.
    */
   viewerVisitReminderChip?: string;
+  /** Badge editorial público (ej. "Recomendado por FECA"). Solo si la curación lo habilita. */
+  fecaRecommendedBadge?: string;
 };
 
 export type FecaPlaceReview = {
@@ -192,17 +195,27 @@ type CityAutocompleteParams = AutocompleteParams;
 type SearchTextParams = {
   lat: number;
   lng: number;
+  includeEnterpriseFields?: boolean;
+  includePhotos?: boolean;
   limit: number;
   query: string;
-  type?: "cafe" | "restaurant";
+  type?: GoogleNearbySearchType;
 };
+
+export type GoogleNearbySearchType =
+  | "cafe"
+  | "restaurant"
+  | "bar"
+  | "bakery";
 
 type NearbyParams = {
   lat: number;
   lng: number;
+  includeEnterpriseFields?: boolean;
+  includePhotos?: boolean;
   limit: number;
   radius: number;
-  type?: "cafe" | "restaurant";
+  type?: GoogleNearbySearchType;
   /** Por defecto DISTANCE. POPULARITY ayuda a mezclar candidatos vs otra pasada por distancia. */
   rankPreference?: "DISTANCE" | "POPULARITY";
 };
@@ -404,25 +417,12 @@ export class GooglePlacesClient {
       `${GOOGLE_BASE_URL}/places:searchText`,
       {
         method: "POST",
-        headers: this.createHeaders(
-          [
-            "places.id",
-            "places.displayName",
-            "places.formattedAddress",
-            "places.location",
-            "places.rating",
-            "places.userRatingCount",
-            "places.types",
-            "places.primaryType",
-            "places.photos",
-            "places.currentOpeningHours",
-            "places.regularOpeningHours",
-          ].join(","),
-        ),
+        headers: this.createHeaders(this.createSearchFieldMask(params)),
         body: JSON.stringify(body),
       },
       {
         method: "searchText",
+        billingTier: params.includeEnterpriseFields ? "enterprise" : "pro",
         trace,
       },
     );
@@ -443,21 +443,7 @@ export class GooglePlacesClient {
       `${GOOGLE_BASE_URL}/places:searchNearby`,
       {
         method: "POST",
-        headers: this.createHeaders(
-          [
-            "places.id",
-            "places.displayName",
-            "places.formattedAddress",
-            "places.location",
-            "places.rating",
-            "places.userRatingCount",
-            "places.types",
-            "places.primaryType",
-            "places.photos",
-            "places.currentOpeningHours",
-            "places.regularOpeningHours",
-          ].join(","),
-        ),
+        headers: this.createHeaders(this.createSearchFieldMask(params)),
         body: JSON.stringify({
           includedTypes,
           languageCode: this.config.googlePlacesLanguage,
@@ -476,6 +462,7 @@ export class GooglePlacesClient {
       },
       {
         method: "nearbySearch",
+        billingTier: params.includeEnterpriseFields ? "enterprise" : "pro",
         trace,
       },
     );
@@ -492,7 +479,10 @@ export class GooglePlacesClient {
   ) {
     this.assertEnabled();
 
-    const url = new URL(`${GOOGLE_BASE_URL}/places/${placeId}`);
+    const normalizedPlaceId = normalizeGooglePlaceId(placeId);
+    const url = new URL(
+      `${GOOGLE_BASE_URL}/places/${encodeURIComponent(normalizedPlaceId)}`,
+    );
     if (options?.sessionToken) {
       url.searchParams.set("sessionToken", options.sessionToken);
     }
@@ -508,19 +498,13 @@ export class GooglePlacesClient {
             "location",
             "types",
             "primaryType",
-            "rating",
-            "userRatingCount",
-            "websiteUri",
-            "nationalPhoneNumber",
             "googleMapsUri",
-            "currentOpeningHours",
-            "regularOpeningHours",
-            "photos",
           ].join(","),
         ),
       },
       {
         method: "getPlaceDetails",
+        billingTier: "pro",
         trace: options?.trace,
       },
     );
@@ -528,7 +512,7 @@ export class GooglePlacesClient {
     const coverPhotoRef = place.photos?.[0]?.name;
 
     return {
-      sourcePlaceId: place.id ?? placeId,
+      sourcePlaceId: place.id ?? normalizedPlaceId,
       name: extractText(place.displayName) ?? "Lugar sin nombre",
       address: place.formattedAddress ?? "",
       city: this.extractCityFromAddress(place.formattedAddress),
@@ -599,59 +583,51 @@ export class GooglePlacesClient {
 
   async getPlaceDetailView(
     placeId: string,
-    trace?: GoogleTraceContext,
+    options?: {
+      includePhotos?: boolean;
+      trace?: GoogleTraceContext;
+    },
   ): Promise<GooglePlaceDetailView> {
     this.assertEnabled();
+    const normalizedPlaceId = normalizeGooglePlaceId(placeId);
+    const fieldMask = [
+      "id",
+      "displayName",
+      "formattedAddress",
+      "location",
+      "googleMapsUri",
+      "types",
+      "primaryType",
+      "currentOpeningHours",
+      "regularOpeningHours",
+      ...(options?.includePhotos ? ["photos"] : []),
+    ];
 
     const place = await this.fetchJson<GooglePlace>(
-      `${GOOGLE_BASE_URL}/places/${placeId}`,
+      `${GOOGLE_BASE_URL}/places/${encodeURIComponent(normalizedPlaceId)}`,
       {
-        headers: this.createHeaders(
-          [
-            "id",
-            "displayName",
-            "formattedAddress",
-            "location",
-            "rating",
-            "userRatingCount",
-            "types",
-            "primaryType",
-            "photos",
-            "currentOpeningHours",
-            "regularOpeningHours",
-            "editorialSummary",
-            "reviews",
-          ].join(","),
-        ),
+        headers: this.createHeaders(fieldMask.join(",")),
       },
       {
         method: "getPlaceDetailView",
-        trace,
+        billingTier: "pro",
+        trace: options?.trace,
       },
     );
 
-    const summary = this.mapPlaceSummary(place, placeId);
+    const summary = this.mapPlaceSummary(place, normalizedPlaceId);
     const photos = (place.photos ?? [])
       .map((photo) => photo.name)
       .filter((photoName): photoName is string => Boolean(photoName))
+      .slice(0, 1)
       .map((photoName) => this.buildPhotoUrl(photoName, 800));
-    const reviews = (place.reviews ?? [])
-      .map((review) => ({
-        authorName: review.authorAttribution?.displayName ?? "",
-        rating: review.rating ?? 0,
-        relativeTime: review.relativePublishTimeDescription ?? "",
-        text: extractText(review.text) ?? "",
-      }))
-      .filter((review) => Boolean(review.authorName) && review.rating > 0);
 
     return {
       ...summary,
-      editorialSummary: extractText(place.editorialSummary) ?? undefined,
       openingHours:
         place.regularOpeningHours?.weekdayDescriptions ??
         place.currentOpeningHours?.weekdayDescriptions,
       photos,
-      reviews: reviews.length > 0 ? reviews : undefined,
     };
   }
 
@@ -665,6 +641,7 @@ export class GooglePlacesClient {
       address: place.formattedAddress ?? "",
       lat: place.location?.latitude ?? 0,
       lng: place.location?.longitude ?? 0,
+      googleMapsUri: place.googleMapsUri,
       rating: place.rating,
       userRatingCount: place.userRatingCount,
       types: place.types ?? [],
@@ -688,6 +665,7 @@ export class GooglePlacesClient {
   }
 
   traceCacheEvent(input: {
+    billingTier?: "essentials" | "pro" | "enterprise" | "enterprise_atmosphere";
     method: GooglePlacesMethod;
     trace?: GoogleTraceContext;
     durationMs?: number;
@@ -702,6 +680,7 @@ export class GooglePlacesClient {
         cache: normalizeTraceText(input.trace?.cache),
         key: normalizeTraceText(input.trace?.key),
         singleFlight: normalizeTraceText(input.trace?.singleFlight),
+        billingTier: normalizeTraceText(input.billingTier),
         durationMs: input.durationMs ?? 0,
         status: input.status ?? "ok",
         ...(input.message ? { message: input.message } : {}),
@@ -712,7 +691,11 @@ export class GooglePlacesClient {
   private async fetchJson<T>(
     input: string,
     init?: RequestInit,
-    meta?: { method: GooglePlacesMethod; trace?: GoogleTraceContext },
+    meta?: {
+      billingTier?: "essentials" | "pro" | "enterprise" | "enterprise_atmosphere";
+      method: GooglePlacesMethod;
+      trace?: GoogleTraceContext;
+    },
   ) {
     const startedAt = Date.now();
     const response = await fetch(input, init);
@@ -721,6 +704,7 @@ export class GooglePlacesClient {
       const text = await response.text();
       this.traceCacheEvent({
         method: meta?.method ?? "getPlaceDetails",
+        billingTier: meta?.billingTier,
         trace: meta?.trace,
         durationMs: Date.now() - startedAt,
         status: "error",
@@ -731,6 +715,7 @@ export class GooglePlacesClient {
 
     this.traceCacheEvent({
       method: meta?.method ?? "getPlaceDetails",
+      billingTier: meta?.billingTier,
       trace: meta?.trace,
       durationMs: Date.now() - startedAt,
     });
@@ -787,6 +772,30 @@ export class GooglePlacesClient {
     };
   }
 
+  private createSearchFieldMask(params: {
+    includeEnterpriseFields?: boolean;
+    includePhotos?: boolean;
+  }) {
+    const fields = [
+      "places.id",
+      "places.displayName",
+      "places.formattedAddress",
+      "places.location",
+      "places.types",
+      "places.primaryType",
+    ];
+
+    if (params.includeEnterpriseFields) {
+      fields.push("places.currentOpeningHours", "places.regularOpeningHours");
+    }
+
+    if (params.includePhotos) {
+      fields.push("places.photos");
+    }
+
+    return fields.join(",");
+  }
+
   private assertEnabled() {
     if (!this.isEnabled) {
       throw new Error("GOOGLE_MAPS_API_KEY is not configured");
@@ -832,6 +841,18 @@ function normalizeTraceText(value?: string) {
 
 function extractText(value?: GoogleTextValue) {
   return value?.text;
+}
+
+function normalizeGooglePlaceId(value: string) {
+  const trimmed = value.trim();
+  let decoded = trimmed;
+  try {
+    decoded = decodeURIComponent(trimmed);
+  } catch {
+    decoded = trimmed;
+  }
+  const resourceNameMatch = decoded.match(/(?:^|\/)places\/([^/?#]+)/);
+  return resourceNameMatch?.[1] ?? decoded;
 }
 
 function pickBestCityGeocodeResult(results: GoogleGeocodeResult[]) {

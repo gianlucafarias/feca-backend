@@ -22,13 +22,22 @@ GOOGLE_OAUTH_WEB_CLIENT_ID=<google-web-client-id>
 GOOGLE_PLACES_COUNTRY=uy
 GOOGLE_PLACES_LANGUAGE=es
 GOOGLE_PLACES_RADIUS_METERS=5000
+GOOGLE_PLACES_LOCAL_ONLY=false
+GOOGLE_PLACE_PHOTOS_HOME_ENABLED=false
+GOOGLE_PLACE_PHOTOS_HOME_LIMIT=6
+GOOGLE_PLACE_PHOTOS_DETAIL_ENABLED=true
 CACHE_TTL_MS=300000
 CACHE_MAX_ITEMS=500
 RATE_LIMIT_TTL=60000
 RATE_LIMIT_LIMIT=60
 TRUST_PROXY=true
+INTERNAL_NOTIFICATIONS_SECRET=<long-random-secret-for-cron-endpoints>
 CORS_ALLOWED_ORIGINS=<comma-separated-browser-origins>
 DATABASE_URL=${{Postgres.DATABASE_URL}}
+# Optional: pg-boss is the production default; omit unless forcing in-process
+# QUEUE_BACKEND=pg-boss
+# Optional: required when running 2+ replicas
+# REDIS_URL=${{Redis.REDIS_URL}}
 ```
 
 Notes:
@@ -81,6 +90,11 @@ Notes:
 - Railway uses `railway.toml` for deploy settings.
 - The deployment runs `npm run prisma:migrate:deploy` before the app starts.
 - Railway waits for `GET /health` to return `200` before switching traffic.
+- For stricter readiness (Postgres must be up), use `GET /health/ready` as the healthcheck path.
+- On first boot with `QUEUE_BACKEND=pg-boss` (production default), pg-boss creates the `pgboss` schema automatically — no extra migration step.
+- Push notifications and Google Data imports run as background jobs; see [Async jobs](./async-jobs.md).
+
+See [Observability guide](./observability.md) for logs and health endpoints.
 
 ## Later: staging
 

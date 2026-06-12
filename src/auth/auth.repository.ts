@@ -203,6 +203,20 @@ export class AuthRepository {
     });
   }
 
+  updateUserIsAdminOverride(userId: string, isAdminOverride: boolean) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { isAdminOverride },
+    });
+  }
+
+  findUserAdminOverride(userId: string) {
+    return this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { isAdminOverride: true },
+    });
+  }
+
   deleteUserById(userId: string) {
     return this.prisma.user.delete({
       where: { id: userId },

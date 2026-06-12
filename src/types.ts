@@ -31,6 +31,7 @@ export type PlaceRecord = {
   coverPhotoRef?: string;
   coverPhotoUrl?: string;
   lastSyncedAt?: string;
+  hiddenFromApp?: boolean;
   createdAt: string;
   updatedAt: string;
 };

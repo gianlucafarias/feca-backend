@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run check
+
+      - run: npm run test
+
+      - run: npm run test:coverage
+
+  deploy-hetzner:
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      packages: write
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: Pack deploy bundle
+        run: tar -czf feca-deploy.tgz -C deploy/hetzner docker-compose.yml Caddyfile scripts
+
+      - name: Copy deploy bundle to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_SSH_USER }}
+          key: ${{ secrets.HETZNER_SSH_PRIVATE_KEY }}
+          source: feca-deploy.tgz
+          target: ${{ secrets.HETZNER_DEPLOY_PATH }}
+
+      - name: Deploy on Hetzner
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_SSH_USER }}
+          key: ${{ secrets.HETZNER_SSH_PRIVATE_KEY }}
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.HETZNER_DEPLOY_PATH }}"
+            tar -xzf feca-deploy.tgz
+            rm -f feca-deploy.tgz
+            chmod +x scripts/*.sh
+            ./scripts/deploy.sh ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}

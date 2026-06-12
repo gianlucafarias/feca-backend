@@ -8,6 +8,7 @@ import {
   Query,
   UseGuards,
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 
 import type { AccessTokenPayload } from "../auth/auth.types";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
@@ -24,6 +25,7 @@ export class PlacesController {
   constructor(private readonly placesService: PlacesService) {}
 
   @Get("autocomplete")
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   autocomplete(
     @Query() query: AutocompletePlacesQueryDto,
     @Headers("x-feca-places-origin") origin?: string,
@@ -32,6 +34,7 @@ export class PlacesController {
   }
 
   @Post("resolve")
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   async resolve(
     @Body() body: ResolvePlaceDto,
     @Headers("x-feca-places-origin") origin?: string,
@@ -50,23 +53,24 @@ export class PlacesController {
   }
 
   @Get("nearby")
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   async nearby(
     @CurrentUser() user: AccessTokenPayload,
     @Query() query: GetNearbyPlacesQueryDto,
     @Headers("x-feca-places-origin") origin?: string,
   ) {
-    const places = await this.placesService.nearby(user.sub, query, origin);
-    return { places };
+    return this.placesService.nearby(user.sub, query, origin);
   }
 
   @Get(":googlePlaceId")
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   async getById(
     @CurrentUser() user: AccessTokenPayload,
     @Param("googlePlaceId") googlePlaceId: string,
     @Headers("x-feca-places-origin") origin?: string,
   ) {
     const place = await this.placesService.getPlaceProfile(
-      user.sub,
+      user,
       googlePlaceId,
       origin,
     );

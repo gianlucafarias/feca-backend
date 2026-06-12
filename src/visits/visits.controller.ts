@@ -1,4 +1,5 @@
 import { Body, Controller, Post, UseGuards } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { AccessTokenGuard } from "../common/guards/access-token.guard";
@@ -12,6 +13,7 @@ export class VisitsController {
   constructor(private readonly visitsService: VisitsService) {}
 
   @Post()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   create(
     @CurrentUser() user: AccessTokenPayload,
     @Body() body: CreateVisitDto,

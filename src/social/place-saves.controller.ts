@@ -6,6 +6,7 @@ import {
   Post,
   UseGuards,
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { AccessTokenGuard } from "../common/guards/access-token.guard";
@@ -26,6 +27,7 @@ export class PlaceSavesController {
   }
 
   @Post(":googlePlaceId/save")
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   savePlace(
     @CurrentUser() user: AccessTokenPayload,
     @Param("googlePlaceId") googlePlaceId: string,

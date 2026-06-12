@@ -1,5 +1,7 @@
 import {
+  ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsIn,
   IsNumber,
@@ -83,6 +85,21 @@ export class CreateVisitDto {
   @IsArray()
   @IsString({ each: true })
   photoUrls: string[] = [];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @MaxLength(32, { each: true })
+  placeDetailTags?: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  hasParking?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  petFriendly?: boolean;
 
   @IsDateString()
   visitedAt!: string;

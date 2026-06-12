@@ -9,6 +9,7 @@ import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { PrismaService } from "../database/prisma.service";
 import { serializeNotification } from "../lib/api-presenters";
 import { NotificationsRepository } from "../infrastructure/repositories/notifications.repository";
+import { PushDispatchService } from "./push-dispatch.service";
 import { ListNotificationsQueryDto } from "./dto/list-notifications.query.dto";
 import { UpsertPushTokenDto } from "./dto/upsert-push-token.dto";
 
@@ -30,6 +31,7 @@ export class NotificationsService {
   constructor(
     private readonly notificationsRepository: NotificationsRepository,
     private readonly prisma: PrismaService,
+    private readonly pushDispatchService: PushDispatchService,
   ) {}
 
   async listMyNotifications(userId: string, query: ListNotificationsQueryDto) {
@@ -148,7 +150,7 @@ export class NotificationsService {
     const payload = normalizeNotificationPayload(input.payload);
     const scheduledFor = input.scheduledFor ?? new Date();
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const existingByUserId = new Set<string>();
 
       if (input.dedupeKey) {
@@ -269,6 +271,12 @@ export class NotificationsService {
         deliveryCount,
       };
     });
+
+    if (result.deliveryCount > 0) {
+      void this.pushDispatchService.scheduleDispatch().catch(() => undefined);
+    }
+
+    return result;
   }
 }
 

@@ -1,0 +1,5 @@
+.env
+.env.local
+backups/
+*.tgz
+.current-image

@@ -33,6 +33,12 @@ type BackfillReport = {
 
 async function main() {
   const dryRun = !process.argv.includes("--write");
+  if (isGooglePlacesLocalOnly()) {
+    throw new Error(
+      "GOOGLE_PLACES_LOCAL_ONLY is enabled; city backfill would call Google Places/Geocoding.",
+    );
+  }
+
   const app = await NestFactory.createApplicationContext(AppModule, {
     logger: ["error", "warn"],
   });
@@ -289,6 +295,11 @@ function normalizeCityName(value: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .trim()
     .toLowerCase();
+}
+
+function isGooglePlacesLocalOnly() {
+  const value = process.env.GOOGLE_PLACES_LOCAL_ONLY;
+  return typeof value === "string" && ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
 void main();

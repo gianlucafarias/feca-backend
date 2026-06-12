@@ -15,7 +15,14 @@ import { OnboardingController } from "./onboarding.controller";
 import { NotificationsService } from "./notifications.service";
 import { PlaceSavesController } from "./place-saves.controller";
 import { PushDispatchService } from "./push-dispatch.service";
+import { PushDispatchWorker } from "./push-dispatch.worker";
+import { SocialDiariesService } from "./social-diaries.service";
+import { SocialFeedService } from "./social-feed.service";
+import { SocialGroupEventsService } from "./social-group-events.service";
+import { SocialGroupsService } from "./social-groups.service";
+import { SocialSavesService } from "./social-saves.service";
 import { SocialService } from "./social.service";
+import { SocialUsersService } from "./social-users.service";
 import { TasteController } from "./taste.controller";
 import { UsersController } from "./users.controller";
 
@@ -37,6 +44,13 @@ import { UsersController } from "./users.controller";
     NotificationsService,
     NotificationsAutomationService,
     PushDispatchService,
+    PushDispatchWorker,
+    SocialFeedService,
+    SocialUsersService,
+    SocialSavesService,
+    SocialGroupEventsService,
+    SocialGroupsService,
+    SocialDiariesService,
     SocialService,
   ],
   exports: [NotificationsService, SocialService],

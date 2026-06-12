@@ -36,6 +36,7 @@ export function mapPlaceRecord(place: Place): PlaceRecord {
     coverPhotoRef: place.coverPhotoRef ?? undefined,
     coverPhotoUrl: place.coverPhotoUrl ?? undefined,
     lastSyncedAt: place.lastSyncedAt?.toISOString(),
+    hiddenFromApp: place.hiddenFromApp,
     createdAt: place.createdAt.toISOString(),
     updatedAt: place.updatedAt.toISOString(),
   };

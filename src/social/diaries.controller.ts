@@ -9,6 +9,7 @@ import {
   Query,
   UseGuards,
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { AccessTokenGuard } from "../common/guards/access-token.guard";
@@ -58,6 +59,7 @@ export class DiariesController {
   }
 
   @Post(":id/places")
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   addPlaceToDiary(
     @CurrentUser() user: AccessTokenPayload,
     @Param("id") diaryId: string,

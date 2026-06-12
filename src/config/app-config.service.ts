@@ -45,6 +45,24 @@ export class AppConfigService {
     });
   }
 
+  get googleDataPortabilityClientId() {
+    return this.configService.get("GOOGLE_DATA_PORTABILITY_CLIENT_ID", {
+      infer: true,
+    });
+  }
+
+  get googleDataPortabilityClientSecret() {
+    return this.configService.get("GOOGLE_DATA_PORTABILITY_CLIENT_SECRET", {
+      infer: true,
+    });
+  }
+
+  get googleDataPortabilityRedirectUri() {
+    return this.configService.get("GOOGLE_DATA_PORTABILITY_REDIRECT_URI", {
+      infer: true,
+    });
+  }
+
   get googlePlacesCountry() {
     return this.configService.get("GOOGLE_PLACES_COUNTRY", { infer: true });
   }
@@ -55,6 +73,30 @@ export class AppConfigService {
 
   get googlePlacesRadiusMeters() {
     return this.configService.get("GOOGLE_PLACES_RADIUS_METERS", {
+      infer: true,
+    });
+  }
+
+  get googlePlacesLocalOnly() {
+    return this.configService.get("GOOGLE_PLACES_LOCAL_ONLY", {
+      infer: true,
+    });
+  }
+
+  get googlePlacePhotosHomeEnabled() {
+    return this.configService.get("GOOGLE_PLACE_PHOTOS_HOME_ENABLED", {
+      infer: true,
+    });
+  }
+
+  get googlePlacePhotosHomeLimit() {
+    return this.configService.get("GOOGLE_PLACE_PHOTOS_HOME_LIMIT", {
+      infer: true,
+    });
+  }
+
+  get googlePlacePhotosDetailEnabled() {
+    return this.configService.get("GOOGLE_PLACE_PHOTOS_DETAIL_ENABLED", {
       infer: true,
     });
   }
@@ -92,6 +134,19 @@ export class AppConfigService {
     return this.configService.get("TRUST_PROXY", { infer: true });
   }
 
+  get redisUrl() {
+    return this.configService.get("REDIS_URL", { infer: true });
+  }
+
+  get queueBackend(): "in-process" | "pg-boss" {
+    const explicit = this.configService.get("QUEUE_BACKEND", { infer: true });
+    if (explicit) {
+      return explicit;
+    }
+
+    return this.nodeEnv === "production" ? "pg-boss" : "in-process";
+  }
+
   get internalNotificationsSecret() {
     return this.configService.get("INTERNAL_NOTIFICATIONS_SECRET", {
       infer: true,
@@ -121,5 +176,18 @@ export class AppConfigService {
 
   isFecaAdminEmail(email: string): boolean {
     return this.fecaAdminEmailSet.has(email.trim().toLowerCase());
+  }
+
+  isFecaAdminUser(user: {
+    email?: string | null;
+    sub?: string | null;
+    id?: string | null;
+    isAdminOverride?: boolean;
+  }) {
+    if (user.email && this.isFecaAdminEmail(user.email)) {
+      return true;
+    }
+
+    return user.isAdminOverride === true;
   }
 }

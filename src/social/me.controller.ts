@@ -15,6 +15,7 @@ import { PaginationQueryDto } from "../common/dto/pagination-query.dto";
 import { AccessTokenGuard } from "../common/guards/access-token.guard";
 import { AuthService } from "../auth/auth.service";
 import type { AccessTokenPayload } from "../auth/auth.types";
+import { PatchMeAdminDto } from "../auth/dto/patch-me-admin.dto";
 import { PatchMeEditorDto } from "../auth/dto/patch-me-editor.dto";
 import { UpdateSocialSettingsDto } from "./dto/update-social-settings.dto";
 import { ListNotificationsQueryDto } from "./dto/list-notifications.query.dto";
@@ -161,5 +162,17 @@ export class MeController {
     @Body() body: PatchMeEditorDto,
   ) {
     return this.authService.setMyEditorFlag(user.sub, body.isEditor);
+  }
+
+  /**
+   * Preview de producto: override temporal en memoria para probar herramientas admin.
+   * Se pierde al reiniciar el proceso; reemplazar por permisos persistidos.
+   */
+  @Patch("admin")
+  patchMyAdmin(
+    @CurrentUser() user: AccessTokenPayload,
+    @Body() body: PatchMeAdminDto,
+  ) {
+    return this.authService.setMyAdminFlag(user.sub, body.isAdmin);
   }
 }

@@ -1,5 +1,15 @@
-import { Type } from "class-transformer";
-import { IsIn, IsNumber, IsOptional, IsString, Max, Min } from "class-validator";
+import { Transform, Type } from "class-transformer";
+import {
+  IsBoolean,
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from "class-validator";
+
+import { EXPLORE_INTENTS } from "../explore-context";
 
 export class GetNearbyPlacesQueryDto {
   /** Si faltan, el backend usa lat/lng del perfil del usuario autenticado. */
@@ -22,6 +32,14 @@ export class GetNearbyPlacesQueryDto {
   type?: "cafe" | "restaurant";
 
   /**
+   * Intent de explore (p. ej. `work_2h`): alinea pool Google + ranking.
+   * Si falta, se infiere de hora y `outingPreferences`.
+   */
+  @IsOptional()
+  @IsIn(EXPLORE_INTENTS)
+  intent?: (typeof EXPLORE_INTENTS)[number];
+
+  /**
    * Contexto del cliente (home / secciones).
    * - `home_nearby`: carrusel general “Lugares cerca”
    * - `home_open_now`: solo `openNow` del mismo pool
@@ -35,13 +53,15 @@ export class GetNearbyPlacesQueryDto {
     "home_nearby",
     "home_open_now",
     "home_friends_liked",
+    "onboarding_past",
   ])
   variant?:
     | "home_city"
     | "home_network"
     | "home_nearby"
     | "home_open_now"
-    | "home_friends_liked";
+    | "home_friends_liked"
+    | "onboarding_past";
 
   /**
    * Opcional: el cliente manda p. ej. `Date.now()` al hacer pull-to-refresh para
@@ -57,4 +77,10 @@ export class GetNearbyPlacesQueryDto {
   @Min(1)
   @Max(20)
   limit = 20;
+
+  /** Devuelve desglose de scoring por lugar (solo para tunear recomendaciones). */
+  @IsOptional()
+  @Transform(({ value }) => value === "1" || value === "true" || value === true)
+  @IsBoolean()
+  debugScores?: boolean;
 }

@@ -128,27 +128,61 @@ enum PushDeliveryStatus {
   cancelled
 }
 
+enum GoogleDataImportStatus {
+  pending
+  authorizing
+  fetching
+  processing
+  complete
+  failed
+  revoked
+}
+
+enum GoogleDataImportConsentType {
+  one_time
+  time_based
+}
+
+enum GoogleDataImportItemKind {
+  saved_place
+  visit
+}
+
+enum GoogleDataImportItemConfidence {
+  high
+  medium
+  low
+}
+
+enum GoogleDataImportItemStatus {
+  parsed
+  matched
+  skipped
+  manual_review
+}
+
 model City {
-  id            String   @id @default(cuid())
-  googlePlaceId String   @unique
-  name          String
-  displayName   String
-  lat           Float?
-  lng           Float?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  users         User[]   @relation("UserCity")
-  places        Place[]  @relation("PlaceCity")
-  featuredDiaries Diary[] @relation("DiaryFeaturedCity")
+  id              String   @id @default(cuid())
+  googlePlaceId   String   @unique
+  name            String
+  displayName     String
+  lat             Float?
+  lng             Float?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  users           User[]   @relation("UserCity")
+  places          Place[]  @relation("PlaceCity")
+  featuredDiaries Diary[]       @relation("DiaryFeaturedCity")
+  placeCurations  PlaceCuration[]
 
   @@index([name])
 }
 
 model User {
-  id                 String           @id @default(cuid())
-  email              String           @unique
-  emailVerified      Boolean          @default(false)
-  username           String           @unique
+  id                 String             @id @default(cuid())
+  email              String             @unique
+  emailVerified      Boolean            @default(false)
+  username           String             @unique
   displayName        String
   avatarUrl          String?
   bio                String?
@@ -156,31 +190,43 @@ model User {
   cityId             String?
   lat                Float?
   lng                Float?
-  tone               DisplayTone      @default(editorial)
-  tastePreferenceIds String[]         @default([])
-  /** Preferencias de salida / ranking (JSON privado; no exponer en perfiles públicos). */
+  tone               DisplayTone        @default(editorial)
+  tastePreferenceIds String[]           @default([])
+  /**
+   * Preferencias de salida / ranking (JSON privado; no exponer en perfiles públicos).
+   */
   outingPreferences  Json?
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
-  cityRef            City?            @relation("UserCity", fields: [cityId], references: [id], onDelete: SetNull)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  cityRef            City?              @relation("UserCity", fields: [cityId], references: [id], onDelete: SetNull)
   identities         AuthIdentity[]
   sessions           Session[]
   visits             Visit[]
   savedPlaces        PlaceSave[]
+  visitPlaceTags     UserVisitPlaceTag[]
+  placeVisitDetailTags UserPlaceVisitDetailTag[]
   settings           UserSettings?
-  following          UserFollow[]     @relation("UserFollowing")
-  followers          UserFollow[]     @relation("UserFollowers")
-  groupsCreated      Group[]          @relation("GroupCreator")
+  following          UserFollow[]       @relation("UserFollowing")
+  followers          UserFollow[]       @relation("UserFollowers")
+  groupsCreated      Group[]            @relation("GroupCreator")
   groupMembers       GroupMember[]
-  groupInvitesSent   GroupMember[]    @relation("GroupInviteSender")
-  eventsProposed     GroupEvent[]     @relation("GroupEventProposer")
+  groupInvitesSent   GroupMember[]      @relation("GroupInviteSender")
+  eventsProposed     GroupEvent[]       @relation("GroupEventProposer")
   eventRsvps         GroupEventRsvp[]
-  diaries            Diary[]          @relation("DiaryCreator")
-  notifications      Notification[]   @relation("UserNotifications")
-  notificationsSent  Notification[]   @relation("NotificationActor")
+  diaries            Diary[]            @relation("DiaryCreator")
+  notifications      Notification[]     @relation("UserNotifications")
+  notificationsSent  Notification[]     @relation("NotificationActor")
   pushInstallations  PushInstallation[]
-  /** Curadores: guías públicas pueden destacarse en inicio (según reglas de producto). */
-  isEditor           Boolean          @default(false)
+  googleDataImports  GoogleDataImport[]
+  /**
+   * Curadores: guías públicas pueden destacarse en inicio (según reglas de producto).
+   */
+  isEditor           Boolean            @default(false)
+  /**
+   * Override de admin de preview (persistente). Complementa `FECA_ADMIN_EMAILS`.
+   */
+  isAdminOverride    Boolean            @default(false)
+  placeCurations     PlaceCuration[]    @relation("PlaceCurationCreator")
 
   @@index([cityId])
   @@index([isEditor])
@@ -243,59 +289,122 @@ model UserFollow {
 }
 
 model Place {
-  id                  String       @id @default(cuid())
-  source              PlaceSource
-  sourcePlaceId       String?      @unique
-  name                String
-  address             String
-  city                String
-  cityId              String?
-  lat                 Float?
-  lng                 Float?
-  categories          String[]
-  ratingExternal      Float?
-  ratingCountExternal Int?
-  phone               String?
-  website             String?
-  openingHours        String[]
-  googleMapsUri       String?
-  coverPhotoRef       String?
-  coverPhotoUrl       String?
-  lastSyncedAt        DateTime?
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
-  cityRef             City?        @relation("PlaceCity", fields: [cityId], references: [id], onDelete: SetNull)
-  visits              Visit[]
-  saves               PlaceSave[]
-  diaryPlaces         DiaryPlace[]
-  groupEvents         GroupEvent[]
+  id                    String                 @id @default(cuid())
+  source                PlaceSource
+  sourcePlaceId         String?                @unique
+  name                  String
+  address               String
+  city                  String
+  cityId                String?
+  lat                   Float?
+  lng                   Float?
+  categories            String[]
+  ratingExternal        Float?
+  ratingCountExternal   Int?
+  phone                 String?
+  website               String?
+  openingHours          String[]
+  googleMapsUri         String?
+  coverPhotoRef         String?
+  coverPhotoUrl         String?
+  lastSyncedAt          DateTime?
+  /** Si true, el lugar no aparece en descubrimiento (cerca, búsqueda, explore). */
+  hiddenFromApp         Boolean                @default(false)
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  cityRef               City?                  @relation("PlaceCity", fields: [cityId], references: [id], onDelete: SetNull)
+  visits                Visit[]
+  saves                 PlaceSave[]
+  diaryPlaces           DiaryPlace[]
+  groupEvents           GroupEvent[]
+  googleDataImportItems GoogleDataImportItem[]
+  curations             PlaceCuration[]
+  userVisitDetailTags   UserPlaceVisitDetailTag[]
 
   @@index([city])
   @@index([cityId])
   @@index([name])
+  @@index([hiddenFromApp])
+  @@index([hiddenFromApp, lat, lng])
+}
+
+model PlaceCuration {
+  id          String    @id @default(cuid())
+  placeId     String
+  cityId      String?
+  boostScore  Int       @default(0)
+  isCityPick  Boolean   @default(false)
+  label       String?
+  active      Boolean   @default(true)
+  /** Si true, el lugar puede mostrar badge público en cards del home. */
+  showRecommendedBadge Boolean @default(false)
+  /** Si está definido y es pasado, la curación deja de influir en ranking (equivale a expirada). */
+  expiresAt   DateTime?
+  createdById String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  place       Place    @relation(fields: [placeId], references: [id], onDelete: Cascade)
+  city        City?    @relation(fields: [cityId], references: [id], onDelete: SetNull)
+  createdBy   User     @relation("PlaceCurationCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@unique([placeId, cityId])
+  @@index([cityId, isCityPick, active])
+  @@index([placeId, active])
 }
 
 model Visit {
-  id           String            @id @default(cuid())
-  placeId      String
-  userId       String
-  rating       Int
-  note         String
-  tags         String[]
-  orderedItems String?
-  wouldReturn  VisitWouldReturn?
-  noiseLevel   Int?
-  wifiQuality  Int?
-  waitLevel    Int?
-  priceTier    Int?
-  photoUrls    String[]          @default([])
-  visitedAt    DateTime
-  createdAt    DateTime          @default(now())
-  place        Place             @relation(fields: [placeId], references: [id], onDelete: Cascade)
-  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id               String            @id @default(cuid())
+  placeId          String
+  userId           String
+  rating           Int
+  note             String
+  tags             String[]
+  orderedItems     String?
+  wouldReturn      VisitWouldReturn?
+  noiseLevel       Int?
+  wifiQuality      Int?
+  waitLevel        Int?
+  priceTier        Int?
+  photoUrls        String[]          @default([])
+  placeDetailTags  String[]          @default([])
+  hasParking       Boolean?
+  petFriendly      Boolean?
+  visitedAt        DateTime
+  createdAt        DateTime          @default(now())
+  place            Place             @relation(fields: [placeId], references: [id], onDelete: Cascade)
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([placeId, createdAt(sort: Desc)])
   @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, visitedAt(sort: Desc)])
+}
+
+/// Tags personalizados «En el lugar» reutilizables por el usuario en cualquier reseña.
+model UserVisitPlaceTag {
+  id        String   @id @default(cuid())
+  userId    String
+  label     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, label])
+  @@index([userId, updatedAt(sort: Desc)])
+}
+
+/// Tags personalizados asociados a un lugar concreto para un usuario.
+model UserPlaceVisitDetailTag {
+  id        String   @id @default(cuid())
+  userId    String
+  placeId   String
+  label     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  place     Place    @relation(fields: [placeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, placeId, label])
+  @@index([userId, placeId, updatedAt(sort: Desc)])
 }
 
 model PlaceSave {
@@ -388,7 +497,9 @@ model Diary {
   coverImageUrl   String?
   visibility      GuideVisibility @default(private)
   publishedAt     DateTime?
-  /** Alcance futuro para carrusel por ciudad; null = sin filtro de ciudad en producto. */
+  /**
+   * Alcance futuro para carrusel por ciudad; null = sin filtro de ciudad en producto.
+   */
   featuredCityId  String?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
@@ -416,42 +527,42 @@ model DiaryPlace {
 }
 
 model Notification {
-  id         String                  @id @default(cuid())
-  userId     String
-  actorId    String?
-  type       NotificationType
-  entityType NotificationEntityType?
-  entityId   String?
-  dedupeKey  String?
-  payload    Json?
-  readAt     DateTime?
-  createdAt  DateTime                @default(now())
-  updatedAt  DateTime                @updatedAt
-  user       User                    @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
-  actor      User?                   @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  id             String                  @id @default(cuid())
+  userId         String
+  actorId        String?
+  type           NotificationType
+  entityType     NotificationEntityType?
+  entityId       String?
+  dedupeKey      String?
+  payload        Json?
+  readAt         DateTime?
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  user           User                    @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  actor          User?                   @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
   pushDeliveries PushDelivery[]
 
+  @@unique([userId, dedupeKey])
   @@index([userId, createdAt(sort: Desc)])
   @@index([userId, readAt, createdAt(sort: Desc)])
   @@index([actorId, createdAt(sort: Desc)])
   @@index([type, createdAt(sort: Desc)])
-  @@unique([userId, dedupeKey])
 }
 
 model PushInstallation {
-  id             String       @id @default(cuid())
+  id             String         @id @default(cuid())
   userId         String
   provider       PushProvider
   installationId String
   token          String
   platform       PushPlatform
   timezone       String
-  lastSeenAt     DateTime     @default(now())
+  lastSeenAt     DateTime       @default(now())
   disabledAt     DateTime?
   revokedAt      DateTime?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   deliveries     PushDelivery[]
 
   @@unique([provider, installationId])
@@ -481,4 +592,49 @@ model PushDelivery {
   @@index([status, scheduledFor, createdAt(sort: Desc)])
   @@index([expoTicketId])
   @@index([installationId, createdAt(sort: Desc)])
+}
+
+model GoogleDataImport {
+  id                         String                      @id @default(cuid())
+  userId                     String
+  status                     GoogleDataImportStatus      @default(pending)
+  requestedScopes            Json
+  consentType                GoogleDataImportConsentType @default(one_time)
+  archiveJobId               String?
+  archiveState               String?
+  archiveUrls                Json?
+  oauthAccessTokenEncrypted  String?
+  oauthRefreshTokenEncrypted String?
+  tokenExpiresAt             DateTime?
+  lastError                  String?
+  createdAt                  DateTime                    @default(now())
+  updatedAt                  DateTime                    @updatedAt
+  completedAt                DateTime?
+  user                       User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items                      GoogleDataImportItem[]
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status, updatedAt(sort: Desc)])
+}
+
+model GoogleDataImportItem {
+  id            String                         @id @default(cuid())
+  importId      String
+  resourceGroup String
+  sourceKey     String
+  rawTitle      String?
+  rawUrl        String?
+  rawPayload    Json
+  mappedPlaceId String?
+  kind          GoogleDataImportItemKind
+  confidence    GoogleDataImportItemConfidence
+  status        GoogleDataImportItemStatus     @default(parsed)
+  createdAt     DateTime                       @default(now())
+  updatedAt     DateTime                       @updatedAt
+  import        GoogleDataImport               @relation(fields: [importId], references: [id], onDelete: Cascade)
+  mappedPlace   Place?                         @relation(fields: [mappedPlaceId], references: [id], onDelete: SetNull)
+
+  @@unique([importId, resourceGroup, sourceKey])
+  @@index([importId, status])
+  @@index([mappedPlaceId])
 }
