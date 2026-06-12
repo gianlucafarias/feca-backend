@@ -8,7 +8,6 @@ import {
 import { PlaceCurationRepository } from "../infrastructure/repositories/place-curation.repository";
 import { PlacesRepository } from "../infrastructure/repositories/places.repository";
 import { SocialRepository } from "../infrastructure/repositories/social.repository";
-import { distanceInMeters } from "../lib/geo";
 import type { GoogleNearbyPlaceType } from "../lib/infer-google-place-types";
 import {
   type NearbyQueryResolved,
@@ -114,18 +113,6 @@ export class PlacesNearbyPoolService {
       const shouldInject =
         row.isCityPick || row.boostScore > 0 || row.showRecommendedBadge;
       if (!shouldInject && !inGooglePool) {
-        continue;
-      }
-      if (
-        typeof row.place.lat === "number" &&
-        typeof row.place.lng === "number" &&
-        distanceInMeters(
-          resolved.lat,
-          resolved.lng,
-          row.place.lat,
-          row.place.lng,
-        ) > radius
-      ) {
         continue;
       }
       upsertNearbyCandidate(byId, {

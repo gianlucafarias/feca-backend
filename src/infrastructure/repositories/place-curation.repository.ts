@@ -139,11 +139,12 @@ export class PlaceCurationRepository {
       return new Map<string, string>();
     }
 
+    const normalizedIds = normalizeGoogleIds(googlePlaceIds);
     const rows = await this.prisma.placeCuration.findMany({
       where: {
         ...activeCurationWhere(cityId),
         showRecommendedBadge: true,
-        place: { sourcePlaceId: { in: googlePlaceIds } },
+        place: { sourcePlaceId: { in: normalizedIds } },
       },
       include: { place: true },
       orderBy: [
@@ -156,10 +157,14 @@ export class PlaceCurationRepository {
     const badges = new Map<string, string>();
     for (const row of rows) {
       const googlePlaceId = row.place.sourcePlaceId?.trim();
-      if (!googlePlaceId || badges.has(googlePlaceId)) {
+      if (!googlePlaceId) {
         continue;
       }
-      badges.set(googlePlaceId, FECA_RECOMMENDED_BADGE_LABEL);
+      const normalizedId = normalizeGooglePlaceId(googlePlaceId);
+      if (badges.has(normalizedId)) {
+        continue;
+      }
+      badges.set(normalizedId, FECA_RECOMMENDED_BADGE_LABEL);
     }
 
     return badges;
@@ -176,6 +181,40 @@ export class PlaceCurationRepository {
       ...this.mapRow(row),
       place: mapPlaceRecord(row.place),
     }));
+  }
+
+  /** Señales de curación de toda la ciudad (no solo lugares ya en el pool Google). */
+  async getCurationSignalsForCity(cityId: string) {
+    const rows = await this.listActiveForCity(cityId);
+    const boosts = new Map<string, number>();
+    const curatedGoogleIds = new Set<string>();
+    const cityPickGoogleIds = new Set<string>();
+
+    for (const row of rows) {
+      const sourcePlaceId = row.place.sourcePlaceId?.trim();
+      if (!sourcePlaceId) {
+        continue;
+      }
+      const googlePlaceId = normalizeGooglePlaceId(sourcePlaceId);
+      curatedGoogleIds.add(googlePlaceId);
+
+      if (row.boostScore > 0) {
+        boosts.set(
+          googlePlaceId,
+          Math.max(boosts.get(googlePlaceId) ?? 0, row.boostScore),
+        );
+      }
+      if (row.isCityPick) {
+        cityPickGoogleIds.add(googlePlaceId);
+      }
+    }
+
+    return {
+      boosts,
+      cityPickGoogleIds,
+      curatedGoogleIds,
+      rows,
+    };
   }
 
   async getActiveBoostsForGooglePlaceIds(
@@ -224,6 +263,24 @@ export class PlaceCurationRepository {
     }
 
     return { boosts, cityPickGoogleIds, curatedGoogleIds };
+  }
+
+  async listCityPickPlacesForCity(cityId: string, limit = 10) {
+    const rows = await this.prisma.placeCuration.findMany({
+      where: {
+        ...activeCurationWhere(cityId),
+        isCityPick: true,
+      },
+      include: { place: true },
+      orderBy: [{ boostScore: "desc" }, { updatedAt: "desc" }],
+      take: limit,
+    });
+
+    return rows.map((row) => ({
+      curation: this.mapRow(row),
+      place: mapPlaceRecord(row.place),
+      distanceMeters: null as number | null,
+    }));
   }
 
   async listCityPickPlacesInRadius(
