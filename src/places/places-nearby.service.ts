@@ -8,6 +8,7 @@ import {
   GooglePlacesClient,
   type NearbyPlaceView,
 } from "../infrastructure/google-places/google-places.client";
+import { CitiesRepository } from "../infrastructure/repositories/cities.repository";
 import { PlaceCurationRepository } from "../infrastructure/repositories/place-curation.repository";
 import { PlacesRepository } from "../infrastructure/repositories/places.repository";
 import { SocialRepository } from "../infrastructure/repositories/social.repository";
@@ -29,6 +30,7 @@ import {
   type NearbyQueryResolved,
   mapStoredPlaceToNearby,
 } from "./places-nearby.helpers";
+import { PlacesCitiesService } from "./places-cities.service";
 import { PlacesNearbyPoolService } from "./places-nearby-pool.service";
 import { PlacesNearbyPresentationService } from "./places-nearby-presentation.service";
 
@@ -45,6 +47,8 @@ export class PlacesNearbyService {
     private readonly googleCache: PlacesGoogleCacheService,
     private readonly poolService: PlacesNearbyPoolService,
     private readonly presentationService: PlacesNearbyPresentationService,
+    private readonly placesCitiesService: PlacesCitiesService,
+    private readonly citiesRepository: CitiesRepository,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {}
 
@@ -85,6 +89,30 @@ export class PlacesNearbyService {
     }
 
     const signals = await this.socialRepository.getUserRecommendationSignals(userId);
+    const curationCityId = await this.resolveCurationCityId(
+      signals.cityId,
+      resolved.lat,
+      resolved.lng,
+      input.cityGooglePlaceId,
+      origin,
+    );
+    const recommendationSignals = {
+      ...signals,
+      cityId: curationCityId ?? signals.cityId,
+    };
+
+    if (process.env.FECA_DEBUG_CITY === "1") {
+      this.logger.log(
+        JSON.stringify({
+          tag: "places.nearby.curation_city",
+          userId,
+          profileCityId: signals.cityId,
+          curationCityId,
+          cityGooglePlaceId: input.cityGooglePlaceId ?? null,
+        }),
+      );
+    }
+
     const query = resolved.query?.trim();
     const poolFetchLimit = 30;
     const candidateLimit = query ? resolved.limit : poolFetchLimit;
@@ -94,8 +122,8 @@ export class PlacesNearbyService {
     const poolProfile = resolved.type
       ? null
       : resolveNearbyGooglePoolProfile({
-          tastePreferenceIds: signals.tastePreferenceIds,
-          outingPreferences: signals.outingPreferences,
+          tastePreferenceIds: recommendationSignals.tastePreferenceIds,
+          outingPreferences: recommendationSignals.outingPreferences,
           inferredIntent,
           explicitIntent: resolved.intent,
         });
@@ -116,7 +144,7 @@ export class PlacesNearbyService {
         : await this.poolService.buildNearbyCandidatePool(
             userId,
             resolved,
-            signals,
+            recommendationSignals,
             visiblePool,
           );
 
@@ -145,20 +173,20 @@ export class PlacesNearbyService {
         this.placesRepository.getFecaQualityByGooglePlaceIds(googleIds),
         this.placeCurationRepository.getActiveBoostsForGooglePlaceIds(
           googleIds,
-          signals.cityId,
+          recommendationSignals.cityId,
         ),
-        signals.cityId
+        recommendationSignals.cityId
           ? this.placeCurationRepository.listCityPickPlacesInRadius(
-              signals.cityId,
+              recommendationSignals.cityId,
               resolved.lat,
               resolved.lng,
               this.config.googlePlacesRadiusMeters,
               8,
             )
           : Promise.resolve([]),
-        signals.cityId
+        recommendationSignals.cityId
           ? this.placeCurationRepository.listCuratedGoogleIdsForCity(
-              signals.cityId,
+              recommendationSignals.cityId,
             )
           : Promise.resolve(new Set<string>()),
       ]);
@@ -194,15 +222,19 @@ export class PlacesNearbyService {
       const ranking = query
         ? { places: work.slice(0, resolved.limit) }
         : rankNearbyPlaceResults(userId, resolved, work, {
-            tastePreferenceIds: signals.tastePreferenceIds,
-            importedPlaceCategoryIds: signals.importedPlaceCategoryIds,
-            likedVisitedPlaceCategoryIds: signals.likedVisitedPlaceCategoryIds,
+            tastePreferenceIds: recommendationSignals.tastePreferenceIds,
+            importedPlaceCategoryIds:
+              recommendationSignals.importedPlaceCategoryIds,
+            likedVisitedPlaceCategoryIds:
+              recommendationSignals.likedVisitedPlaceCategoryIds,
             dislikedVisitedPlaceCategoryIds:
-              signals.dislikedVisitedPlaceCategoryIds,
-            outingPreferences: signals.outingPreferences,
+              recommendationSignals.dislikedVisitedPlaceCategoryIds,
+            outingPreferences: recommendationSignals.outingPreferences,
             inferredIntent,
             explicitExploreIntent: resolved.intent,
-            likedNearbyGooglePlaceIds: new Set(signals.likedNearbyGooglePlaceIds),
+            likedNearbyGooglePlaceIds: new Set(
+              recommendationSignals.likedNearbyGooglePlaceIds,
+            ),
             fecaQualityByGoogleId,
             adminBoostByGoogleId: adminSignals.boosts,
             curatedGoogleIds: curatedGoogleIdsForCity,
@@ -233,7 +265,7 @@ export class PlacesNearbyService {
           photoLimit: this.presentationService.getNearbyPhotoLimit(),
           priorityPhotoGoogleIds,
           viewerRadar,
-          cityId: signals.cityId,
+          cityId: recommendationSignals.cityId,
         },
       );
 
@@ -419,6 +451,7 @@ export class PlacesNearbyService {
       {
         lat: input.lat,
         lng: input.lng,
+        cityGooglePlaceId: input.cityGooglePlaceId,
         limit: input.limit,
         intent: input.intent,
         variant,
@@ -446,5 +479,52 @@ export class PlacesNearbyService {
     }
 
     return this.socialRepository.getUserCoordinates(userId);
+  }
+
+  private async resolveCurationCityId(
+    profileCityId: string | null,
+    lat: number,
+    lng: number,
+    cityGooglePlaceId: string | undefined,
+    origin?: string,
+  ): Promise<string | null> {
+    const trimmedGooglePlaceId = cityGooglePlaceId?.trim();
+    if (trimmedGooglePlaceId) {
+      try {
+        const city =
+          await this.placesCitiesService.getOrCreateCityRecordByGooglePlaceId(
+            trimmedGooglePlaceId,
+            origin,
+          );
+        return city.id;
+      } catch {
+        const city =
+          await this.citiesRepository.findCityByGooglePlaceId(
+            trimmedGooglePlaceId,
+          );
+        if (city) {
+          return city.id;
+        }
+      }
+    }
+
+    if (profileCityId) {
+      return profileCityId;
+    }
+
+    try {
+      const city = await this.placesCitiesService.getOrCreateCityRecordFromCoordinates(
+        lat,
+        lng,
+        origin,
+      );
+      return city.id;
+    } catch {
+      const nearest = await this.citiesRepository.findNearestCityByCoordinates(
+        lat,
+        lng,
+      );
+      return nearest?.id ?? null;
+    }
   }
 }

@@ -1,5 +1,5 @@
 import { Type } from "class-transformer";
-import { IsIn, IsNumber, IsOptional, Max, Min } from "class-validator";
+import { IsIn, IsNumber, IsOptional, IsString, Max, Min } from "class-validator";
 
 import { EXPLORE_INTENTS } from "../explore-context";
 
@@ -17,6 +17,10 @@ export class ExploreContextQueryDto {
   @Type(() => Number)
   @IsNumber()
   lng?: number;
+
+  @IsOptional()
+  @IsString()
+  cityGooglePlaceId?: string;
 
   @Type(() => Number)
   @IsNumber()

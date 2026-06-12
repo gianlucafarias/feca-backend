@@ -8,6 +8,7 @@ import {
   nearbySqlTakeLimit,
 } from "../../lib/geo-bounds";
 import { FECA_RECOMMENDED_BADGE_LABEL } from "../../lib/place-curation";
+import { normalizeGooglePlaceId } from "../../places/places-nearby.helpers";
 import { mapPlaceRecord } from "./prisma-mappers";
 
 export type PlaceCurationRecord = {
@@ -68,8 +69,22 @@ function activeCurationWhere(
   return {
     ...base,
     cityId,
-    place: { cityId, hiddenFromApp: false },
+    place: {
+      hiddenFromApp: false,
+      OR: [{ cityId }, { cityId: null }],
+    },
   };
+}
+
+function normalizeGoogleIds(googlePlaceIds: string[]) {
+  const ids = new Set<string>();
+  for (const googlePlaceId of googlePlaceIds) {
+    const normalized = normalizeGooglePlaceId(googlePlaceId);
+    if (normalized) {
+      ids.add(normalized);
+    }
+  }
+  return [...ids];
 }
 
 @Injectable()
@@ -110,7 +125,7 @@ export class PlaceCurationRepository {
     for (const row of rows) {
       const googlePlaceId = row.place.sourcePlaceId?.trim();
       if (googlePlaceId) {
-        ids.add(googlePlaceId);
+        ids.add(normalizeGooglePlaceId(googlePlaceId));
       }
     }
     return ids;
@@ -175,10 +190,11 @@ export class PlaceCurationRepository {
       };
     }
 
+    const normalizedIds = normalizeGoogleIds(googlePlaceIds);
     const rows = await this.prisma.placeCuration.findMany({
       where: {
         ...activeCurationWhere(cityId),
-        place: { sourcePlaceId: { in: googlePlaceIds } },
+        place: { sourcePlaceId: { in: normalizedIds } },
       },
       include: { place: true },
     });
@@ -188,21 +204,22 @@ export class PlaceCurationRepository {
     const curatedGoogleIds = new Set<string>();
 
     for (const row of rows) {
-      const googlePlaceId = row.place.sourcePlaceId;
+      const googlePlaceId = row.place.sourcePlaceId?.trim();
       if (!googlePlaceId) {
         continue;
       }
+      const normalizedId = normalizeGooglePlaceId(googlePlaceId);
 
-      curatedGoogleIds.add(googlePlaceId);
+      curatedGoogleIds.add(normalizedId);
 
       if (row.boostScore > 0) {
         boosts.set(
-          googlePlaceId,
-          Math.max(boosts.get(googlePlaceId) ?? 0, row.boostScore),
+          normalizedId,
+          Math.max(boosts.get(normalizedId) ?? 0, row.boostScore),
         );
       }
       if (row.isCityPick) {
-        cityPickGoogleIds.add(googlePlaceId);
+        cityPickGoogleIds.add(normalizedId);
       }
     }
 

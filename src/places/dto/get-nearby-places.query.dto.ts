@@ -23,6 +23,11 @@ export class GetNearbyPlacesQueryDto {
   @IsNumber()
   lng?: number;
 
+  /** Ciudad canónica del viewer; alinea curaciones admin con la ciudad activa. */
+  @IsOptional()
+  @IsString()
+  cityGooglePlaceId?: string;
+
   @IsOptional()
   @IsString()
   query?: string;

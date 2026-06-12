@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 
 import type { CityRecord } from "../../types";
+import { distanceInMeters } from "../../lib/geo";
 import { PrismaService } from "../../database/prisma.service";
 import { mapCityRecord } from "./prisma-mappers";
 
@@ -22,6 +23,36 @@ export class CitiesRepository {
     });
 
     return city ? mapCityRecord(city) : null;
+  }
+
+  async findNearestCityByCoordinates(
+    lat: number,
+    lng: number,
+    maxDistanceMeters = 80_000,
+  ): Promise<CityRecord | null> {
+    const cities = await this.prisma.city.findMany({
+      where: {
+        lat: { not: null },
+        lng: { not: null },
+      },
+    });
+
+    let nearest: CityRecord | null = null;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+
+    for (const city of cities) {
+      if (city.lat == null || city.lng == null) {
+        continue;
+      }
+      const distance = distanceInMeters(lat, lng, city.lat, city.lng);
+      if (distance > maxDistanceMeters || distance >= nearestDistance) {
+        continue;
+      }
+      nearestDistance = distance;
+      nearest = mapCityRecord(city);
+    }
+
+    return nearest;
   }
 
   async listAll(limit = 80) {
