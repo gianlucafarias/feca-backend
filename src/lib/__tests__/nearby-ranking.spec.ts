@@ -114,6 +114,22 @@ describe("rankNearbyPlaceResults", () => {
     expect(result.places.length).toBeGreaterThan(0);
   });
 
+  it("prepends city picks even when they were filtered out of ranking", () => {
+    const cityPick = place("pick", { rating: 2.1 });
+    const result = rankNearbyPlaceResults(
+      "user-1",
+      { lat: -34.901, lng: -56.164, limit: 2, variant: "home_nearby" },
+      [place("1"), place("2")],
+      baseContext({
+        cityPickPlaces: [cityPick],
+        curatedGoogleIds: new Set(["pick"]),
+        adminBoostByGoogleId: new Map([["pick", 90]]),
+      }),
+    );
+
+    expect(result.places[0]?.googlePlaceId).toBe("pick");
+  });
+
   it("applies city pick slots and curated cap on home mix", () => {
     const places = [
       place("1"),
@@ -231,8 +247,6 @@ describe("rankNearbyPlaceResults", () => {
           ["1", 30],
           ["2", 29],
           ["3", 28],
-          ["4", 27],
-          ["5", 26],
         ]),
       }),
     );

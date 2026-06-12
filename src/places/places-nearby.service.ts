@@ -29,6 +29,8 @@ import { PlacesGoogleCacheService } from "./places-google-cache.service";
 import {
   type NearbyQueryResolved,
   mapStoredPlaceToNearby,
+  mergeCityCurationsIntoNearbyCandidates,
+  prependAdminCuratedPlaces,
 } from "./places-nearby.helpers";
 import { PlacesCitiesService } from "./places-cities.service";
 import { PlacesNearbyPoolService } from "./places-nearby-pool.service";
@@ -148,48 +150,55 @@ export class PlacesNearbyService {
             visiblePool,
           );
 
-      const visibleCandidates = candidates.filter(
+      let visibleCandidates = candidates.filter(
         (place) => !hiddenGoogleIds.has(place.googlePlaceId),
       );
+
+      const cityCuration = recommendationSignals.cityId
+        ? await this.placeCurationRepository.getCurationSignalsForCity(
+            recommendationSignals.cityId,
+          )
+        : {
+            boosts: new Map<string, number>(),
+            cityPickGoogleIds: new Set<string>(),
+            curatedGoogleIds: new Set<string>(),
+            rows: [],
+          };
+
+      if (!query && cityCuration.rows.length > 0) {
+        visibleCandidates = mergeCityCurationsIntoNearbyCandidates(
+          visibleCandidates,
+          cityCuration.rows,
+        ).filter((place) => !hiddenGoogleIds.has(place.googlePlaceId));
+      }
 
       if (visibleCandidates.length === 0) {
         return { places: [] as NearbyPlaceView[] };
       }
 
       const googleIds = visibleCandidates.map((p) => p.googlePlaceId);
-      const [
-        overlay,
-        viewerRadar,
-        fecaQualityByGoogleId,
-        adminSignals,
-        cityPickRows,
-        curatedGoogleIdsForCity,
-      ] = await Promise.all([
-        this.socialRepository.getNearbyNetworkSignalsForGooglePlaces(
-          userId,
-          googleIds,
-        ),
-        this.socialRepository.getViewerRadarVisitOverlay(userId, googleIds),
-        this.placesRepository.getFecaQualityByGooglePlaceIds(googleIds),
-        this.placeCurationRepository.getActiveBoostsForGooglePlaceIds(
-          googleIds,
-          recommendationSignals.cityId,
-        ),
-        recommendationSignals.cityId
-          ? this.placeCurationRepository.listCityPickPlacesInRadius(
-              recommendationSignals.cityId,
-              resolved.lat,
-              resolved.lng,
-              this.config.googlePlacesRadiusMeters,
-              8,
-            )
-          : Promise.resolve([]),
-        recommendationSignals.cityId
-          ? this.placeCurationRepository.listCuratedGoogleIdsForCity(
-              recommendationSignals.cityId,
-            )
-          : Promise.resolve(new Set<string>()),
-      ]);
+      const [overlay, viewerRadar, fecaQualityByGoogleId, cityPickRows] =
+        await Promise.all([
+          this.socialRepository.getNearbyNetworkSignalsForGooglePlaces(
+            userId,
+            googleIds,
+          ),
+          this.socialRepository.getViewerRadarVisitOverlay(userId, googleIds),
+          this.placesRepository.getFecaQualityByGooglePlaceIds(googleIds),
+          recommendationSignals.cityId
+            ? this.placeCurationRepository.listCityPickPlacesForCity(
+                recommendationSignals.cityId,
+                8,
+              )
+            : Promise.resolve([]),
+        ]);
+
+      const adminSignals = {
+        boosts: cityCuration.boosts,
+        cityPickGoogleIds: cityCuration.cityPickGoogleIds,
+        curatedGoogleIds: cityCuration.curatedGoogleIds,
+      };
+      const curatedGoogleIdsForCity = cityCuration.curatedGoogleIds;
 
       let work = visibleCandidates;
       if (resolved.variant === "home_open_now") {
@@ -243,18 +252,41 @@ export class PlacesNearbyService {
             debugScores: input.debugScores === true,
           });
 
+      const shouldPrependAdmin =
+        !query &&
+        cityCuration.rows.length > 0 &&
+        resolved.variant !== "home_friends_liked" &&
+        resolved.variant !== "onboarding_past";
+      const rankedPlaces = shouldPrependAdmin
+        ? prependAdminCuratedPlaces(ranking.places, cityCuration.rows, {
+            limit: resolved.limit,
+            requireOpenNow: resolved.variant === "home_open_now",
+          })
+        : ranking.places;
+
+      if (process.env.FECA_DEBUG_CITY === "1") {
+        this.logger.log(
+          JSON.stringify({
+            tag: "places.nearby.curation_apply",
+            userId,
+            variant: resolved.variant ?? null,
+            curationRows: cityCuration.rows.length,
+            prepended: shouldPrependAdmin,
+            resultIds: rankedPlaces.map((place) => place.googlePlaceId),
+            boostedIds: [...cityCuration.boosts.keys()],
+          }),
+        );
+      }
+
       const priorityPhotoGoogleIds = new Set<string>([
         ...curatedGoogleIdsForCity,
         ...adminSignals.cityPickGoogleIds,
       ]);
       const rankedWithPhotos =
-        await this.presentationService.hydrateMissingNearbyPhotos(
-          ranking.places,
-          {
-            origin,
-            priorityGoogleIds: priorityPhotoGoogleIds,
-          },
-        );
+        await this.presentationService.hydrateMissingNearbyPhotos(rankedPlaces, {
+          origin,
+          priorityGoogleIds: priorityPhotoGoogleIds,
+        });
 
       const places = await this.presentationService.presentNearbyPlaces(
         userId,

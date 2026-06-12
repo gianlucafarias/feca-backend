@@ -225,10 +225,7 @@ function applyCityPickSlots(
     return ranked.slice(0, limit);
   }
 
-  const rankedIds = new Set(ranked.map((p) => p.googlePlaceId));
-  const forced = cityPicks
-    .filter((p) => rankedIds.has(p.googlePlaceId))
-    .slice(0, MAX_FORCED_CITY_PICKS);
+  const forced = cityPicks.slice(0, MAX_FORCED_CITY_PICKS);
   const forcedIds = new Set(forced.map((p) => p.googlePlaceId));
   const rest = ranked.filter((p) => !forcedIds.has(p.googlePlaceId));
   return [...forced, ...rest].slice(0, limit);
@@ -313,9 +310,17 @@ export function rankNearbyPlaceResults(
   const scoringIntent =
     context.explicitExploreIntent ?? context.inferredIntent;
 
+  const protectedGoogleIds = new Set<string>([
+    ...context.curatedGoogleIds,
+    ...context.adminBoostByGoogleId.keys(),
+  ]);
+
   let work = places;
   if (homeMix) {
     work = places.filter((place) => {
+      if (protectedGoogleIds.has(place.googlePlaceId)) {
+        return true;
+      }
       const feca = context.fecaQualityByGoogleId.get(place.googlePlaceId);
       if (shouldExcludeByFecaQuality(feca)) {
         return false;

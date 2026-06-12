@@ -187,6 +187,105 @@ export function stableShuffleGooglePlaces(
   return arr;
 }
 
+type CityCurationRow = {
+  boostScore: number;
+  isCityPick: boolean;
+  showRecommendedBadge: boolean;
+  updatedAt: Date;
+  place: PlaceRecord;
+};
+
+export function mergeCityCurationsIntoNearbyCandidates(
+  candidates: GooglePlaceSummary[],
+  curationRows: CityCurationRow[],
+) {
+  const byId = new Map<string, GooglePlaceSummary>();
+  for (const place of candidates) {
+    if (!place.googlePlaceId) {
+      continue;
+    }
+    byId.set(normalizeGooglePlaceId(place.googlePlaceId), {
+      ...place,
+      googlePlaceId: normalizeGooglePlaceId(place.googlePlaceId),
+    });
+  }
+
+  for (const row of curationRows) {
+    const sourcePlaceId = row.place.sourcePlaceId?.trim();
+    if (!sourcePlaceId) {
+      continue;
+    }
+
+    const shouldInject =
+      row.isCityPick || row.boostScore > 0 || row.showRecommendedBadge;
+    if (!shouldInject) {
+      continue;
+    }
+
+    const googlePlaceId = normalizeGooglePlaceId(sourcePlaceId);
+
+    upsertNearbyCandidate(byId, {
+      ...mapStoredPlaceToNearby(row.place),
+      googlePlaceId,
+    });
+  }
+
+  return [...byId.values()];
+}
+
+export function prependAdminCuratedPlaces(
+  ranked: GooglePlaceSummary[],
+  curationRows: CityCurationRow[],
+  options: {
+    limit: number;
+    requireOpenNow?: boolean;
+  },
+) {
+  const prioritized = curationRows
+    .filter(
+      (row) =>
+        row.isCityPick || row.boostScore > 0 || row.showRecommendedBadge,
+    )
+    .sort(
+      (a, b) =>
+        Number(b.isCityPick) - Number(a.isCityPick) ||
+        b.boostScore - a.boostScore ||
+        b.updatedAt.getTime() - a.updatedAt.getTime(),
+    );
+
+  const forced: GooglePlaceSummary[] = [];
+  const forcedIds = new Set<string>();
+
+  for (const row of prioritized) {
+    if (forced.length >= options.limit) {
+      break;
+    }
+    const sourcePlaceId = row.place.sourcePlaceId?.trim();
+    if (!sourcePlaceId) {
+      continue;
+    }
+
+    const place = {
+      ...mapStoredPlaceToNearby(row.place),
+      googlePlaceId: normalizeGooglePlaceId(sourcePlaceId),
+    };
+
+    if (options.requireOpenNow && place.openNow !== true) {
+      continue;
+    }
+
+    if (forcedIds.has(place.googlePlaceId)) {
+      continue;
+    }
+
+    forced.push(place);
+    forcedIds.add(place.googlePlaceId);
+  }
+
+  const rest = ranked.filter((place) => !forcedIds.has(place.googlePlaceId));
+  return [...forced, ...rest].slice(0, options.limit);
+}
+
 export function normalizeGooglePlaceId(value: string) {
   const trimmed = value.trim();
   let decoded = trimmed;
