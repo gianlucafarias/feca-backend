@@ -131,7 +131,7 @@ export function scoreGoogleQualityPenalty(place: GooglePlaceSummary) {
 }
 
 export const ADMIN_BOOST_CAP = 45;
-export const MAX_FORCED_CITY_PICKS = 2;
+export const MAX_FORCED_CITY_PICKS = 4;
 /** Máx lugares con curación activa en el top del carrusel home (anti-repetición). */
 export const MAX_CURATED_SLOTS_IN_TOP = 5;
 export const LIKED_VISIT_AFFINITY_BOOST = 30;

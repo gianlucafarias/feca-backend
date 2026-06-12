@@ -15,6 +15,7 @@ import {
   mapStoredPlaceToNearby,
   mergeGooglePlacesById,
   nearbyPoolRankSlotKey,
+  normalizeGooglePlaceId,
   shuffleSeed,
   stableShuffleGooglePlaces,
   upsertNearbyCandidate,
@@ -60,9 +61,11 @@ export class PlacesNearbyPoolService {
   ): Promise<GooglePlaceSummary[]> {
     const byId = new Map<string, GooglePlaceSummary>();
     for (const place of googlePool) {
-      if (place.googlePlaceId) {
-        byId.set(place.googlePlaceId, place);
+      if (!place.googlePlaceId) {
+        continue;
       }
+      const normalizedId = normalizeGooglePlaceId(place.googlePlaceId);
+      byId.set(normalizedId, { ...place, googlePlaceId: normalizedId });
     }
 
     const radius = this.config.googlePlacesRadiusMeters;
@@ -106,7 +109,8 @@ export class PlacesNearbyPoolService {
       if (!googlePlaceId) {
         continue;
       }
-      const inGooglePool = byId.has(googlePlaceId);
+      const normalizedId = normalizeGooglePlaceId(googlePlaceId);
+      const inGooglePool = byId.has(normalizedId);
       const shouldInject =
         row.isCityPick || row.boostScore > 0 || row.showRecommendedBadge;
       if (!shouldInject && !inGooglePool) {
@@ -124,7 +128,10 @@ export class PlacesNearbyPoolService {
       ) {
         continue;
       }
-      upsertNearbyCandidate(byId, mapStoredPlaceToNearby(row.place));
+      upsertNearbyCandidate(byId, {
+        ...mapStoredPlaceToNearby(row.place),
+        googlePlaceId: normalizedId,
+      });
     }
 
     return stableShuffleGooglePlaces(

@@ -153,7 +153,7 @@ function buildPlacesRankingSeed(
   const hour = utcHourBucketId(new Date());
   const r =
     rotate != null && Number.isFinite(rotate) && rotate > 0
-      ? String(Math.floor(rotate))
+      ? utcHourBucketId(new Date(rotate))
       : "";
   return `${userId}:${scope}:${type}:${v}:${week}:${hour}:${lat.toFixed(2)}:${lng.toFixed(2)}:${r}`;
 }
@@ -193,18 +193,24 @@ function buildPinnedCurationPlaces(
     pinnedIds.add(place.googlePlaceId);
   }
 
-  for (const place of candidates) {
+  const boostedCandidates = candidates
+    .filter((place) => (adminBoostByGoogleId.get(place.googlePlaceId) ?? 0) > 0)
+    .sort(
+      (a, b) =>
+        (adminBoostByGoogleId.get(b.googlePlaceId) ?? 0) -
+          (adminBoostByGoogleId.get(a.googlePlaceId) ?? 0) ||
+        a.googlePlaceId.localeCompare(b.googlePlaceId),
+    );
+
+  for (const place of boostedCandidates) {
     if (pinned.length >= MAX_FORCED_CITY_PICKS) {
       break;
     }
     if (pinnedIds.has(place.googlePlaceId)) {
       continue;
     }
-    const boost = adminBoostByGoogleId.get(place.googlePlaceId) ?? 0;
-    if (boost >= 65) {
-      pinned.push(place);
-      pinnedIds.add(place.googlePlaceId);
-    }
+    pinned.push(place);
+    pinnedIds.add(place.googlePlaceId);
   }
 
   return pinned;
@@ -233,6 +239,7 @@ function applyCuratedSlotCap(
   ordered: GooglePlaceSummary[],
   curatedIds: Set<string>,
   limit: number,
+  boostedGoogleIds: Set<string>,
 ): GooglePlaceSummary[] {
   if (curatedIds.size === 0) {
     return ordered.slice(0, limit);
@@ -250,7 +257,8 @@ function applyCuratedSlotCap(
       continue;
     }
     const isCurated = curatedIds.has(place.googlePlaceId);
-    if (isCurated && curatedCount >= MAX_CURATED_SLOTS_IN_TOP) {
+    const isBoosted = boostedGoogleIds.has(place.googlePlaceId);
+    if (isCurated && !isBoosted && curatedCount >= MAX_CURATED_SLOTS_IN_TOP) {
       continue;
     }
     if (isCurated) {
@@ -290,6 +298,7 @@ export function rankNearbyPlaceResults(
   const homeMix =
     !useNetworkInRank &&
     (variant === undefined ||
+      variant === "home_city" ||
       variant === "home_nearby" ||
       variant === "home_open_now" ||
       onboardingPast);
@@ -454,6 +463,11 @@ export function rankNearbyPlaceResults(
   const diversified = homeMix
     ? diversifyTopPlacesByCategory(ordered, input.limit)
     : ordered.slice(0, input.limit);
+  const boostedGoogleIds = new Set(
+    [...context.adminBoostByGoogleId.entries()]
+      .filter(([, boost]) => boost > 0)
+      .map(([googlePlaceId]) => googlePlaceId),
+  );
   const pinnedCurationPlaces =
     homeMix && !onboardingPast
       ? buildPinnedCurationPlaces(
@@ -471,6 +485,7 @@ export function rankNearbyPlaceResults(
         withCityPicks,
         context.curatedGoogleIds,
         input.limit,
+        boostedGoogleIds,
       )
     : withCityPicks;
 
