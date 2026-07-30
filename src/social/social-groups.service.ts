@@ -88,7 +88,7 @@ export class SocialGroupsService {
         error instanceof PrismaClientKnownRequestError &&
         error.code === "P2002"
       ) {
-        throw new ConflictException("No se pudo generar un codigo de invitacion");
+        throw new ConflictException("No se pudo generar un código de invitación");
       }
 
       throw error;

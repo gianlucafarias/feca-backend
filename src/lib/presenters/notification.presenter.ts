@@ -48,7 +48,7 @@ function normalizeNotificationData(payload: Prisma.JsonValue | null) {
   return payload as Record<string, unknown>;
 }
 
-function buildNotificationPresentation(
+export function buildNotificationPresentation(
   type: NotificationType,
   actor: ReturnType<typeof serializeUserSummary> | null,
   data: Record<string, unknown> | null,
@@ -60,7 +60,7 @@ function buildNotificationPresentation(
   switch (type) {
     case "follow":
       return {
-        body: `${actorName} empezo a seguirte`,
+        body: `${actorName} empezó a seguirte`,
         deepLink: actor ? `/user/${actor.id}` : null,
         title: "Nuevo seguidor",
       };
@@ -68,16 +68,16 @@ function buildNotificationPresentation(
       const groupId = readNotificationString(data, "groupId") ?? entity?.id ?? null;
       const groupName = readNotificationString(data, "groupName") ?? "tu plan";
       return {
-        body: `${actorName} te invito a ${groupName}`,
+        body: `${actorName} te invitó a ${groupName}`,
         deepLink: groupId ? `/group/${groupId}` : null,
-        title: "Invitacion a un plan",
+        title: "Invitación a un plan",
       };
     }
     case "group_joined": {
       const groupId = readNotificationString(data, "groupId") ?? entity?.id ?? null;
       const groupName = readNotificationString(data, "groupName") ?? "tu plan";
       return {
-        body: `${actorName} se sumo a ${groupName}`,
+        body: `${actorName} se sumó a ${groupName}`,
         deepLink: groupId ? `/group/${groupId}` : null,
         title: "Nuevo miembro en el plan",
       };
@@ -97,7 +97,7 @@ function buildNotificationPresentation(
       const placeName = readNotificationString(data, "placeName") ?? "el plan";
       const rsvp = mapRsvpLabel(readNotificationString(data, "rsvp"));
       return {
-        body: `${actorName} respondio ${rsvp} para ${placeName}`,
+        body: `${actorName} respondió ${rsvp} para ${placeName}`,
         deepLink: groupId ? `/group/${groupId}` : null,
         title: "Nuevo RSVP",
       };
@@ -109,27 +109,27 @@ function buildNotificationPresentation(
         readNotificationString(data, "placeId") ??
         null;
       return {
-        body: `${actorName} visito ${placeName}`,
+        body: `${actorName} visitó ${placeName}`,
         deepLink: placeRouteId ? `/place/${placeRouteId}` : null,
         title: "Nueva visita",
       };
     }
     case "diary_published": {
       const diaryId = readNotificationString(data, "diaryId") ?? entity?.id ?? null;
-      const diaryName = readNotificationString(data, "diaryName") ?? "una guia";
+      const diaryName = readNotificationString(data, "diaryName") ?? "una guía";
       return {
-        body: `${actorName} publico ${diaryName}`,
+        body: `${actorName} publicó ${diaryName}`,
         deepLink: diaryId ? `/diary/${diaryId}` : null,
-        title: "Nueva guia publicada",
+        title: "Nueva guía publicada",
       };
     }
     case "group_invite_reminder": {
       const groupId = readNotificationString(data, "groupId") ?? entity?.id ?? null;
       const groupName = readNotificationString(data, "groupName") ?? "tu plan";
       return custom ?? {
-        body: `Todavia tenes pendiente la invitacion a ${groupName}`,
+        body: `Todavía tenés pendiente la invitación a ${groupName}`,
         deepLink: groupId ? `/group/${groupId}` : null,
-        title: "Invitacion pendiente",
+        title: "Invitación pendiente",
       };
     }
     case "group_event_rsvp_reminder": {
@@ -153,7 +153,7 @@ function buildNotificationPresentation(
     case "weekly_digest":
       return (
         custom ?? {
-          body: "Mira lo mas interesante de tu red esta semana.",
+          body: "Mirá lo más interesante de tu red esta semana.",
           deepLink: "/notifications",
           title: "Resumen semanal",
         }
@@ -166,9 +166,9 @@ function buildNotificationPresentation(
         null;
       const placeName = readNotificationString(data, "placeName") ?? "un lugar";
       return custom ?? {
-        body: `Tenemos una recomendacion para tu proxima salida: ${placeName}`,
+        body: `Tenemos una recomendación para tu próxima salida: ${placeName}`,
         deepLink: placeRouteId ? `/place/${placeRouteId}` : null,
-        title: "Recomendacion para vos",
+        title: "Recomendación para vos",
       };
     }
     default: {
@@ -176,7 +176,7 @@ function buildNotificationPresentation(
       return {
         body: String(unexpected),
         deepLink: null,
-        title: "Notificacion",
+        title: "Notificación",
       };
     }
   }
@@ -213,7 +213,7 @@ function mapRsvpLabel(value?: string) {
     case "going":
       return '"voy"';
     case "maybe":
-      return '"quizas"';
+      return '"quizás"';
     case "declined":
       return '"no voy"';
     default:

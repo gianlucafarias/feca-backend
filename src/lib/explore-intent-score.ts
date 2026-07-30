@@ -60,7 +60,7 @@ export function exploreReasonLine(
     case "first_date":
       return "Buen tono para una primera cita";
     case "snack_fast":
-      return "Sirve para una pausa rapida";
+      return "Sirve para una pausa rápida";
     case "reading":
       return "Tranqui para leer";
     case "group_4":
