@@ -6,12 +6,12 @@ Roadmap to prepare `feca-backend` for real production: scalable, fast, observabl
 
 | Area | Status | Notes |
 |------|--------|-------|
-| Tests + CI | **Done (Phase 0)** | Vitest, lib unit tests, GitHub Actions |
-| Observability | **Done (Phase 1)** | JSON logs, request ID, `/health/ready`, HTTP metrics |
+| Tests + CI | **Done (Phase 0)** | Typecheck, tests, coverage, build, dependency audit and Docker build |
+| Observability | **Launch baseline done** | JSON logs, request ID, readiness, secured metrics, push/host/backup checks; external crash/log provider remains a gate |
 | Portable cache | **Done (Phase 2)** | Redis optional via `REDIS_URL` |
 | God-class split | **Done (Phase 3)** | All source files ≤500 lines; facades for social/places repos and services |
 | DB performance | **Done (Phase 4)** | Bounding-box geo SQL, indexes, pooling docs |
-| Async jobs | **Done (Phase 5)** | pg-boss + in-process queue; push + Google import async |
+| Async jobs | **Done (Phase 5)** | pg-boss + in-process queue; push + Google import async; stalled delivery detection |
 | Deploy checklist | **Done (Phase 6)** | Env vars, scale triggers, provider-agnostic runbook |
 
 Detailed task breakdown: [2026-06-12-production-readiness plan](./superpowers/plans/2026-06-12-production-readiness.md).
@@ -37,33 +37,46 @@ Phase 6  Deploy checklist               ✓ done
 
 ## Quality gates (target)
 
-- [x] CI green on every PR (`npm run check` + `npm run test`)
+- [x] CI green on every PR (`npm run release:check` + production Docker build)
+- [x] Release gate builds the exact `dist/main.js` artifact and audits production dependencies
 - [x] ≥60% coverage on `src/lib/` (**~97%** on scoring/ranking/geo; presenters excluded)
 - [x] `/health/ready` checks Postgres
 - [x] JSON logs with `requestId` in production
+- [x] Secured per-instance HTTP metrics endpoint
+- [x] External scheduled checks for API, queue, containers, disk, and backups
 - [x] Cache switchable: in-memory ↔ Redis via `REDIS_URL`
 - [x] No source file >500 lines (goal <400)
 - [x] Documented cost tiers by user stage
 
 ## Cost tiers (infra only, excl. Google API)
 
-| Stage | Users | Est. $/month |
-|-------|-------|--------------|
-| Beta | <500 | $15–25 |
-| Growth | 500–5k | $30–50 |
-| Scale | 5k+ | $50–100 |
+| Stage | Users | Infra shape | Est. $/month |
+|-------|-------|-------------|------------------|
+| Beta | <500 | Current 2 vCPU / 4 GB VPS + optional snapshot | $10–25 |
+| Growth | 500–5k | Larger VPS or second app replica + Redis/offsite backup | $30–70 |
+| Scale | 5k+ | Multiple app replicas, managed/pooler DB, external observability | $75+ |
 
-Google Places is usually the largest variable cost — cache aggressively and monitor request volume.
+The current Hetzner server reports **$9.49/month** before snapshots, backup
+storage, taxes, or traffic overages (verified 2026-07-30). Google Places is the
+largest variable application cost and is not included above. Configure a
+Google Cloud billing budget and API quota alert before public promotion; cache
+and per-user rate limits reduce usage but are not a spending cap.
 
 ## Deploy checklist (any provider)
 
-1. Build Docker image from root `Dockerfile`
-2. Set required env vars (see `.env.example`)
-3. Run `npm run prisma:migrate:deploy`
-4. Start app (`node dist/main.js`)
-5. Wait for `GET /health` → `200` before routing traffic
-6. Optional stricter gate: `GET /health/ready` → `200` (Postgres connected)
-7. Set `TRUST_PROXY=true` when behind a platform load balancer
+1. Run `npm run release:check`
+2. Build Docker image from root `Dockerfile`
+3. Set required env vars (see `.env.example`)
+4. Take and verify a database backup
+5. Run `npm run prisma:migrate:deploy`
+6. Start app (`node dist/main.js`)
+7. Require `GET /health/ready` → `200` before routing traffic
+8. Set `TRUST_PROXY=true` when behind a platform load balancer
+
+Production migrations must be backward-compatible with the previous
+application image. The Hetzner deploy script automatically restores that image
+when the new container fails readiness, but it intentionally does not attempt
+to reverse a database migration.
 
 ### Required production env
 
@@ -71,11 +84,17 @@ Google Places is usually the largest variable cost — cache aggressively and mo
 NODE_ENV=production
 DATABASE_URL=...
 AUTH_JWT_ACCESS_SECRET=...
+AUTH_JWT_ISSUER=feca-backend
+AUTH_JWT_AUDIENCE=feca-app
 GOOGLE_MAPS_API_KEY=...
 GOOGLE_OAUTH_WEB_CLIENT_ID=...
 INTERNAL_NOTIFICATIONS_SECRET=...
 TRUST_PROXY=true
 ```
+
+Production validation requires JWT and internal-job secrets of at least 32
+characters. Browser origins, when configured, must be explicit HTTPS origins;
+native clients without an `Origin` header remain supported.
 
 ### Optional (scale / ops)
 
@@ -85,13 +104,19 @@ REDIS_URL=...
 
 # Background jobs — defaults to pg-boss in production (uses Postgres schema `pgboss`)
 QUEUE_BACKEND=pg-boss
-
-# Error tracking (optional)
-SENTRY_DSN=...
-
-# OpenTelemetry export (optional, future)
-OTEL_EXPORTER_OTLP_ENDPOINT=...
 ```
+
+Google Data Portability remains disabled unless all four values are configured:
+
+```env
+GOOGLE_DATA_PORTABILITY_CLIENT_ID=...
+GOOGLE_DATA_PORTABILITY_CLIENT_SECRET=...
+GOOGLE_DATA_PORTABILITY_REDIRECT_URI=https://api.example.com/v1/google-data-imports/oauth/callback
+GOOGLE_DATA_PORTABILITY_TOKEN_ENCRYPTION_KEY=...
+```
+
+The token encryption key must be independent from the JWT key so JWT rotation
+does not make stored Google tokens unreadable.
 
 ### Scale triggers
 
@@ -104,6 +129,22 @@ OTEL_EXPORTER_OTLP_ENDPOINT=...
 | Slow nearby queries | Geo bounding box + indexes (Phase 4) |
 | DB connection exhaustion | PgBouncer / pooler + Prisma `connection_limit` |
 
+The current single CPX22 (2 vCPU, 4 GB) is the beta launch topology. It is not
+highly available: a host outage causes downtime. Horizontal scaling is a
+measured response, not a launch prerequisite, but it requires Redis for shared
+cache/rate limits and a load balancer before adding a second app replica.
+
+### External launch gates
+
+- Configure `PRODUCTION_INTERNAL_SECRET` in GitHub Actions to match the server.
+- Enable GitHub Actions failure notifications for the production operators.
+- Configure a Google Cloud billing budget and Places quota alerts.
+- Verify APNs/FCM credentials with one physical iOS and Android device.
+- Choose and configure crash reporting/searchable log retention, or explicitly
+  accept reduced diagnostic capability for the closed beta.
+- Keep at least one backup copy outside the VPS (Hetzner snapshot or object
+  storage) and perform a restore drill.
+
 ## What we are not doing (yet)
 
 - Microservices split
@@ -114,6 +155,12 @@ OTEL_EXPORTER_OTLP_ENDPOINT=...
 ## Running tests locally
 
 See [Testing guide](./testing.md).
+
+The complete local/CI gate is:
+
+```bash
+npm run release:check
+```
 
 ## Observability
 

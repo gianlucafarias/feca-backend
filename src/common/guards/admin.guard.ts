@@ -5,7 +5,6 @@ import {
   Injectable,
 } from "@nestjs/common";
 
-import { AuthRepository } from "../../auth/auth.repository";
 import type { AccessTokenPayload } from "../../auth/auth.types";
 import { AppConfigService } from "../../config/app-config.service";
 
@@ -13,7 +12,6 @@ import { AppConfigService } from "../../config/app-config.service";
 export class AdminGuard implements CanActivate {
   constructor(
     private readonly config: AppConfigService,
-    private readonly authRepository: AuthRepository,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -27,11 +25,6 @@ export class AdminGuard implements CanActivate {
     }
 
     if (this.config.isFecaAdminEmail(user.email)) {
-      return true;
-    }
-
-    const adminOverride = await this.authRepository.findUserAdminOverride(user.sub);
-    if (adminOverride?.isAdminOverride) {
       return true;
     }
 

@@ -1,13 +1,15 @@
 import {
   Body,
   Controller,
+  Get,
   Headers,
   Post,
   ServiceUnavailableException,
-  UnauthorizedException,
 } from "@nestjs/common";
 
+import { assertInternalSecret } from "../common/security/internal-secret";
 import { AppConfigService } from "../config/app-config.service";
+import { QueueService } from "../infrastructure/queue/queue.service";
 import { NotificationsAutomationService } from "./notifications-automation.service";
 import { PushDispatchService } from "./push-dispatch.service";
 
@@ -17,7 +19,33 @@ export class InternalNotificationsController {
     private readonly config: AppConfigService,
     private readonly pushDispatchService: PushDispatchService,
     private readonly notificationsAutomationService: NotificationsAutomationService,
+    private readonly queueService: QueueService,
   ) {}
+
+  @Get("status")
+  async status(
+    @Headers("x-feca-internal-secret") headerSecret?: string,
+    @Headers("x-internal-notifications-secret") legacyHeaderSecret?: string,
+  ) {
+    this.assertAuthorized(headerSecret ?? legacyHeaderSecret);
+
+    const [push, queue] = await Promise.all([
+      this.pushDispatchService.getOperationalStatus(),
+      Promise.resolve(this.queueService.getOperationalStatus()),
+    ]);
+    const result = {
+      healthy: push.healthy && queue.healthy,
+      now: new Date().toISOString(),
+      push,
+      queue,
+    };
+
+    if (!result.healthy) {
+      throw new ServiceUnavailableException(result);
+    }
+
+    return result;
+  }
 
   @Post("dispatch")
   dispatch(
@@ -49,17 +77,7 @@ export class InternalNotificationsController {
   }
 
   private assertAuthorized(secret?: string) {
-    const configuredSecret = this.config.internalNotificationsSecret?.trim();
-
-    if (!configuredSecret) {
-      throw new ServiceUnavailableException(
-        "Internal notifications secret is not configured",
-      );
-    }
-
-    if (!secret || secret !== configuredSecret) {
-      throw new UnauthorizedException("Invalid internal notifications secret");
-    }
+    assertInternalSecret(this.config.internalNotificationsSecret, secret);
   }
 }
 

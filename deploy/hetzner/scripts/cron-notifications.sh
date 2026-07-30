@@ -28,4 +28,7 @@ curl -fsS -X POST "${BASE_URL}/internal/notifications/receipts" \
 curl -fsS -X POST "${BASE_URL}/internal/notifications/automations" \
   -H "${AUTH_HEADER}"
 
+curl -fsS "${BASE_URL}/internal/notifications/status" \
+  -H "${AUTH_HEADER}"
+
 echo "Notifications cron OK at $(date -u +%Y-%m-%dT%H:%M:%SZ)"

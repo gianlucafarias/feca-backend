@@ -179,13 +179,28 @@ Log rotation is configured in `docker-compose.yml` (max-size / max-file).
 | `https://api.../health/live` | Process up |
 | `https://api.../health/ready` | Postgres (+ Redis if set) OK |
 
-GitHub Actions **Production health** workflow pings `/health/ready` every 10 minutes when `PRODUCTION_HEALTH_URL` is set.
+GitHub Actions **Production health** runs every 10 minutes and checks:
 
-### Recommended add-ons (post-launch)
+- `/health/ready`;
+- the secured notification queue status;
+- backend, Caddy, and Postgres container state over SSH;
+- host disk usage;
+- latest backup age and gzip integrity.
 
-1. **Sentry** — set `SENTRY_DSN` in `.env` (wire in app when ready)
-2. **Uptime Kuma** — self-hosted on same or second VPS
-3. **Hetzner Metrics** — CPU/RAM/disk alerts in Cloud Console
+Set `PRODUCTION_INTERNAL_SECRET` to the server's
+`INTERNAL_NOTIFICATIONS_SECRET`. Enable workflow-failure notifications for the
+operators; a check without a recipient is telemetry, not an alert.
+
+### External integrations to configure
+
+1. **Crash reporting / searchable logs** — choose Sentry or another provider,
+   then verify its account, retention, and alert recipient. `SENTRY_DSN` is
+   only a placeholder today; the application does not claim it is active.
+2. **Off-host backup** — enable a Hetzner snapshot or copy encrypted database
+   backups to object storage, then test a restore.
+3. **Google Cloud budget/quota alerts** — Places is the main variable cost.
+4. **Hetzner graphs** — use the Console for CPU/network trends; the scheduled
+   host check already alerts on containers, disk, and backup age.
 
 See [Observability guide](./observability.md).
 

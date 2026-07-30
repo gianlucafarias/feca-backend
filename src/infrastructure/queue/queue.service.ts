@@ -6,7 +6,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from "@nestjs/common";
-import PgBoss = require("pg-boss");
+import PgBoss from "pg-boss";
 
 import { AppConfigService } from "../../config/app-config.service";
 import type { EnqueueOptions, QueueJobName } from "./queue.types";
@@ -68,6 +68,19 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
 
   usesPgBoss() {
     return this.boss !== null;
+  }
+
+  getOperationalStatus() {
+    const backend = this.config.queueBackend;
+    const healthy =
+      this.started && (backend !== "pg-boss" || this.boss !== null);
+
+    return {
+      backend,
+      healthy,
+      registeredWorkers: this.workers.length,
+      started: this.started,
+    };
   }
 
   async onModuleInit() {

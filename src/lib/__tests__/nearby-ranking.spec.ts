@@ -159,6 +159,24 @@ describe("rankNearbyPlaceResults", () => {
     expect(result.places).toHaveLength(1);
   });
 
+  it("uses open_now intent scoring for home_open_now variant", () => {
+    const places = [
+      place("1", { openNow: false }),
+      place("2", { openNow: true }),
+    ];
+    const result = rankNearbyPlaceResults(
+      "user-1",
+      { lat: -34.901, lng: -56.164, limit: 1, variant: "home_open_now" },
+      places,
+      baseContext({
+        explicitExploreIntent: "open_now",
+        adminBoostByGoogleId: new Map([["1", 80]]),
+        curatedGoogleIds: new Set(["1"]),
+      }),
+    );
+    expect(result.places[0]?.googlePlaceId).toBe("1");
+  });
+
   it("adds light network boost on home_open_now", () => {
     const result = rankNearbyPlaceResults(
       "user-1",

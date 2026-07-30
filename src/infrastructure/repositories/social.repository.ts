@@ -185,13 +185,15 @@ export class SocialRepository {
   createDiary(input: Parameters<SocialDiariesRepository["createDiary"]>[0]) {
     return this.diariesRepository.createDiary(input);
   }
-  listHomeEditorGuides(limit: number) {
-    return this.diariesRepository.listHomeEditorGuides(limit);
+  listHomeEditorGuides(viewerId: string, limit: number) {
+    return this.diariesRepository.listHomeEditorGuides(viewerId, limit);
   }
   patchDiary(diaryId: string, data: Prisma.DiaryUpdateInput) {
     return this.diariesRepository.patchDiary(diaryId, data);
   }
-  searchPublicDiaries(input: PaginationInput & { q: string }) {
+  searchPublicDiaries(
+    input: PaginationInput & { q: string; viewerId: string },
+  ) {
     return this.diariesRepository.searchPublicDiaries(input);
   }
   findDiaryById(diaryId: string) {

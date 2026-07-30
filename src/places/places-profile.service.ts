@@ -6,7 +6,6 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 
-import { AuthRepository } from "../auth/auth.repository";
 import type { AccessTokenPayload } from "../auth/auth.types";
 import { AppConfigService } from "../config/app-config.service";
 import {
@@ -30,7 +29,6 @@ export class PlacesProfileService {
   private readonly logger = new Logger(PlacesProfileService.name);
 
   constructor(
-    private readonly authRepository: AuthRepository,
     private readonly placesRepository: PlacesRepository,
     private readonly socialRepository: SocialRepository,
     private readonly citiesService: PlacesCitiesService,
@@ -259,11 +257,6 @@ export class PlacesProfileService {
   }
 
   private async resolveViewerIsAdmin(viewer: AccessTokenPayload) {
-    if (this.config.isFecaAdminEmail(viewer.email)) {
-      return true;
-    }
-
-    const adminOverride = await this.authRepository.findUserAdminOverride(viewer.sub);
-    return adminOverride?.isAdminOverride === true;
+    return this.config.isFecaAdminEmail(viewer.email);
   }
 }

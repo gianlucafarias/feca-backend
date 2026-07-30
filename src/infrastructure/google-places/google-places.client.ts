@@ -1,6 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 
 import { AppConfigService } from "../../config/app-config.service";
+import { fetchWithTimeout } from "../../common/http/fetch-with-timeout";
 import type { NearbyFriendSocialRow } from "../../lib/nearby-network-chips";
 
 const GOOGLE_BASE_URL = "https://places.googleapis.com/v1";
@@ -698,7 +699,7 @@ export class GooglePlacesClient {
     },
   ) {
     const startedAt = Date.now();
-    const response = await fetch(input, init);
+    const response = await fetchWithTimeout(input, init);
 
     if (!response.ok) {
       const text = await response.text();
@@ -727,7 +728,7 @@ export class GooglePlacesClient {
     meta?: { method: GooglePlacesMethod; trace?: GoogleTraceContext },
   ) {
     const startedAt = Date.now();
-    const response = await fetch(input);
+    const response = await fetchWithTimeout(input);
 
     if (!response.ok) {
       const text = await response.text();

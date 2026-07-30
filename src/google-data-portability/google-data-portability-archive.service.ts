@@ -5,6 +5,7 @@ import {
 } from "@nestjs/common";
 
 import { AppConfigService } from "../config/app-config.service";
+import { fetchWithTimeout } from "../common/http/fetch-with-timeout";
 import { GOOGLE_DATA_PORTABILITY_MVP_RESOURCES } from "./google-data-portability.constants";
 
 type ExchangeCodeResult = {
@@ -40,7 +41,7 @@ export class GoogleDataPortabilityArchiveService {
       );
     }
 
-    const response = await fetch("https://oauth2.googleapis.com/token", {
+    const response = await fetchWithTimeout("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -85,7 +86,7 @@ export class GoogleDataPortabilityArchiveService {
       );
     }
 
-    const response = await fetch("https://oauth2.googleapis.com/token", {
+    const response = await fetchWithTimeout("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -114,7 +115,7 @@ export class GoogleDataPortabilityArchiveService {
   }
 
   async initiateArchive(accessToken: string): Promise<InitiateArchiveResult> {
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       "https://dataportability.googleapis.com/v1/portabilityArchive:initiate",
       {
         method: "POST",
@@ -144,7 +145,7 @@ export class GoogleDataPortabilityArchiveService {
     accessToken: string,
     archiveJobId: string,
   ): Promise<ArchiveStateResult> {
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `https://dataportability.googleapis.com/v1/archiveJobs/${encodeURIComponent(
         archiveJobId,
       )}/portabilityArchiveState`,

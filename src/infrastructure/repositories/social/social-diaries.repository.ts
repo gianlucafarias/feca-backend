@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { GuideVisibility, Prisma } from "@prisma/client";
+import { ContentVisibility, GuideVisibility, Prisma } from "@prisma/client";
 
 import { PrismaService } from "../../../database/prisma.service";
 import { diaryInclude, type PaginationInput } from "./social.repository.types";
@@ -41,12 +41,13 @@ export class SocialDiariesRepository {
     });
   }
 
-  async listHomeEditorGuides(limit: number) {
+  async listHomeEditorGuides(viewerId: string, limit: number) {
     const diaries = await this.prisma.diary.findMany({
       where: {
         createdBy: { isEditor: true },
         publishedAt: { not: null },
         visibility: GuideVisibility.public,
+        AND: [buildDiaryOwnerVisibilityWhere(viewerId)],
       },
       include: diaryInclude,
       orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
@@ -64,10 +65,13 @@ export class SocialDiariesRepository {
     });
   }
 
-  async searchPublicDiaries(input: PaginationInput & { q: string }) {
+  async searchPublicDiaries(
+    input: PaginationInput & { q: string; viewerId: string },
+  ) {
     const normalizedQuery = input.q.trim();
     const where: Prisma.DiaryWhereInput = {
       visibility: GuideVisibility.public,
+      AND: [buildDiaryOwnerVisibilityWhere(input.viewerId)],
       OR: [
         { name: { contains: normalizedQuery, mode: "insensitive" } },
         { description: { contains: normalizedQuery, mode: "insensitive" } },
@@ -139,4 +143,36 @@ export class SocialDiariesRepository {
 
     return this.findDiaryById(diaryId);
   }
+}
+
+function buildDiaryOwnerVisibilityWhere(
+  viewerId: string,
+): Prisma.DiaryWhereInput {
+  return {
+    OR: [
+      { createdById: viewerId },
+      {
+        createdBy: {
+          settings: { is: null },
+        },
+      },
+      {
+        createdBy: {
+          settings: {
+            is: { diaryVisibility: ContentVisibility.public },
+          },
+        },
+      },
+      {
+        createdBy: {
+          followers: {
+            some: { followerId: viewerId },
+          },
+          settings: {
+            is: { diaryVisibility: ContentVisibility.followers },
+          },
+        },
+      },
+    ],
+  };
 }

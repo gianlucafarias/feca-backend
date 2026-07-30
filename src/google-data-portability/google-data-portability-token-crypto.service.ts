@@ -51,7 +51,10 @@ export class GoogleDataPortabilityTokenCryptoService {
 
   private get key() {
     return createHash("sha256")
-      .update(this.config.authJwtAccessSecret)
+      .update(
+        this.config.googleDataPortabilityTokenEncryptionKey ??
+          this.config.authJwtAccessSecret,
+      )
       .digest();
   }
 }

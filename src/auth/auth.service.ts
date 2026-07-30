@@ -68,9 +68,7 @@ export class AuthService {
       throw new UnauthorizedException("Invalid refresh token");
     }
 
-    await this.authRepository.revokeSessionById(existingSession.id);
-
-    return this.issueSession(existingSession.user);
+    return this.issueSession(existingSession.user, existingSession.id);
   }
 
   async logout(refreshToken: string) {
@@ -102,16 +100,6 @@ export class AuthService {
         pushEnabled: socialSettings.pushEnabled,
       },
     };
-  }
-
-  async setMyEditorFlag(userId: string, isEditor: boolean) {
-    await this.authRepository.updateUserIsEditor(userId, isEditor);
-    return this.getMe(userId);
-  }
-
-  async setMyAdminFlag(userId: string, isAdmin: boolean) {
-    await this.authRepository.updateUserIsAdminOverride(userId, isAdmin);
-    return this.getMe(userId);
   }
 
   async deleteMyAccount(userId: string): Promise<void> {
@@ -167,32 +155,31 @@ export class AuthService {
         }
       }
 
-      const updatedUser = await this.authRepository.updateUserProfile(
-        userId,
-        {
-          ...profileInput,
-          cityId,
-          ...(outingForDb !== undefined ? { outingPreferences: outingForDb } : {}),
-        },
-      );
+      const { settings: socialSettings, user: updatedUser } =
+        await this.authRepository.updateUserProfile(
+          userId,
+          {
+            ...profileInput,
+            cityId,
+            ...(outingForDb !== undefined
+              ? { outingPreferences: outingForDb }
+              : {}),
+          },
+          {
+            ...(input.groupInvitePolicy !== undefined
+              ? {
+                  groupInvitePolicy: mapApiGroupInvitePolicyToPrisma(
+                    input.groupInvitePolicy,
+                  ),
+                }
+              : {}),
+            ...(input.pushEnabled !== undefined
+              ? { pushEnabled: input.pushEnabled }
+              : {}),
+          },
+        );
 
-      const [socialSettings, stats] = await Promise.all([
-        input.groupInvitePolicy !== undefined || input.pushEnabled !== undefined
-          ? this.socialRepository.updateSocialSettings(userId, {
-              ...(input.groupInvitePolicy !== undefined
-                ? {
-                    groupInvitePolicy: mapApiGroupInvitePolicyToPrisma(
-                      input.groupInvitePolicy,
-                    ),
-                  }
-                : {}),
-              ...(input.pushEnabled !== undefined
-                ? { pushEnabled: input.pushEnabled }
-                : {}),
-            })
-          : this.socialRepository.getSocialSettings(userId),
-        this.socialRepository.getProfileStats(userId),
-      ]);
+      const stats = await this.socialRepository.getProfileStats(userId);
 
       return {
         user: {
@@ -218,7 +205,10 @@ export class AuthService {
     }
   }
 
-  private async issueSession(user: User): Promise<AuthSessionPayload> {
+  private async issueSession(
+    user: User,
+    previousSessionId?: string,
+  ): Promise<AuthSessionPayload> {
     const accessTokenExpiresAt = addMinutes(
       new Date(),
       this.config.authAccessTokenTtlMinutes,
@@ -233,24 +223,38 @@ export class AuthService {
       sub: user.id,
     };
 
-    const accessToken = await this.jwtService.signAsync(accessTokenPayload, {
-      expiresIn: `${this.config.authAccessTokenTtlMinutes}m`,
-      secret: this.config.authJwtAccessSecret,
-    });
-
-    const refreshToken = randomBytes(48).toString("base64url");
-
-    await this.authRepository.createSession({
-      expiresAt: refreshTokenExpiresAt,
-      refreshTokenHash: hashRefreshToken(refreshToken),
-      userId: user.id,
-    });
-
-    const hydratedUser = await this.authRepository.findUserByIdWithCity(user.id);
-    const socialSettings = await this.socialRepository.getSocialSettings(user.id);
+    const [accessToken, hydratedUser, socialSettings] = await Promise.all([
+      this.jwtService.signAsync(accessTokenPayload, {
+        audience: this.config.authJwtAudience,
+        expiresIn: `${this.config.authAccessTokenTtlMinutes}m`,
+        issuer: this.config.authJwtIssuer,
+        secret: this.config.authJwtAccessSecret,
+      }),
+      this.authRepository.findUserByIdWithCity(user.id),
+      this.socialRepository.getSocialSettings(user.id),
+    ]);
 
     if (!hydratedUser) {
       throw new UnauthorizedException("User not found");
+    }
+
+    const refreshToken = randomBytes(48).toString("base64url");
+    const sessionInput = {
+      expiresAt: refreshTokenExpiresAt,
+      refreshTokenHash: hashRefreshToken(refreshToken),
+      userId: user.id,
+    };
+
+    if (previousSessionId) {
+      const rotated = await this.authRepository.rotateActiveSession(
+        previousSessionId,
+        sessionInput,
+      );
+      if (!rotated) {
+        throw new UnauthorizedException("Invalid refresh token");
+      }
+    } else {
+      await this.authRepository.createSession(sessionInput);
     }
 
     return {

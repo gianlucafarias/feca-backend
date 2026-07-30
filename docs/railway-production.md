@@ -15,6 +15,8 @@ Set these in the backend service Variables tab:
 ```env
 NODE_ENV=production
 AUTH_JWT_ACCESS_SECRET=<long-random-secret>
+AUTH_JWT_ISSUER=feca-backend
+AUTH_JWT_AUDIENCE=feca-app
 AUTH_ACCESS_TOKEN_TTL_MINUTES=15
 AUTH_REFRESH_TOKEN_TTL_DAYS=30
 GOOGLE_MAPS_API_KEY=<google-maps-server-key>

@@ -74,6 +74,7 @@ export function mapStoredPlaceToNearby(
     types: place.categories,
     primaryType: place.categories[0],
     photoUrl: place.coverPhotoUrl,
+    // openNow solo viene de Google en tiempo real; en DB guardamos horarios estáticos.
     openNow: undefined,
     openingWeekdayLines:
       place.openingHours && place.openingHours.length > 0
@@ -238,7 +239,6 @@ export function prependAdminCuratedPlaces(
   curationRows: CityCurationRow[],
   options: {
     limit: number;
-    requireOpenNow?: boolean;
   },
 ) {
   const prioritized = curationRows
@@ -269,10 +269,6 @@ export function prependAdminCuratedPlaces(
       ...mapStoredPlaceToNearby(row.place),
       googlePlaceId: normalizeGooglePlaceId(sourcePlaceId),
     };
-
-    if (options.requireOpenNow && place.openNow !== true) {
-      continue;
-    }
 
     if (forcedIds.has(place.googlePlaceId)) {
       continue;

@@ -176,8 +176,8 @@ export class SocialService {
     return this.diariesService.createDiary(userId, body);
   }
 
-  listHomeEditorGuides(limit: number) {
-    return this.diariesService.listHomeEditorGuides(limit);
+  listHomeEditorGuides(viewerId: string, limit: number) {
+    return this.diariesService.listHomeEditorGuides(viewerId, limit);
   }
 
   getDiary(viewerId: string, diaryId: string) {

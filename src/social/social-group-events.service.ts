@@ -201,10 +201,17 @@ export class SocialGroupEventsService {
       });
     }
 
-    if (membership.status === "declined" || membership.status === "left") {
+    if (membership.status === "pending") {
+      throw new ForbiddenException({
+        code: "GROUP_INVITE_PENDING",
+        message: "Acepta la invitación antes de interactuar con el plan.",
+      });
+    }
+
+    if (membership.status !== "accepted") {
       throw new ForbiddenException({
         code: "GROUP_ACTION_REQUIRES_MEMBERSHIP",
-        message: "Ya no formás parte de este plan.",
+        message: "Ya no formas parte de este plan.",
       });
     }
   }
