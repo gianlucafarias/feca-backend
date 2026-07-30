@@ -147,11 +147,11 @@ export class NotificationsAutomationService {
           type: "group",
         },
         payload: {
-          body: `Todavia tenes pendiente la invitacion a ${member.group.name}.`,
+          body: `Todavía tenés pendiente la invitación a ${member.group.name}.`,
           deepLink: `/group/${member.group.id}`,
           groupId: member.group.id,
           groupName: member.group.name,
-          title: "Invitacion pendiente",
+          title: "Invitación pendiente",
         },
         recipientIds: [member.userId],
         type: "group_invite_reminder",
@@ -710,13 +710,13 @@ function buildWeeklyDigestBody(input: {
 
   if (input.visitCount > 0) {
     parts.push(
-      `Tu red compartio ${input.visitCount} visita${input.visitCount === 1 ? "" : "s"} en los ultimos 7 dias.`,
+      `Tu red compartió ${input.visitCount} visita${input.visitCount === 1 ? "" : "s"} en los últimos 7 días.`,
     );
   }
 
   if (input.diaryCount > 0) {
     parts.push(
-      `Tambien aparecieron ${input.diaryCount} guia${input.diaryCount === 1 ? "" : "s"} nueva${input.diaryCount === 1 ? "" : "s"}.`,
+      `También aparecieron ${input.diaryCount} guía${input.diaryCount === 1 ? "" : "s"} nueva${input.diaryCount === 1 ? "" : "s"}.`,
     );
   }
 
@@ -736,11 +736,11 @@ function buildContextualBody(slot: ContextualSlot, placeName: string) {
     case "weekday_morning":
       return `Te recomendamos ${placeName} para trabajar un rato.`;
     case "weekday_afternoon":
-      return `Te recomendamos ${placeName} para una pausa rapida.`;
+      return `Te recomendamos ${placeName} para una pausa rápida.`;
     case "weekday_evening":
       return `Te recomendamos ${placeName} para bajar el ritmo.`;
     case "weekend_day":
-      return `Te recomendamos ${placeName} para un plan largo de dia.`;
+      return `Te recomendamos ${placeName} para un plan largo de día.`;
     case "weekend_night":
       return `Te recomendamos ${placeName} para salir esta tarde.`;
   }

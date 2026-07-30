@@ -276,7 +276,7 @@ export function buildBestMoments(visits: VisitWithRelations[]) {
   }
 
   if (visits.some((visit) => (visit.waitLevel ?? 5) <= 2)) {
-    lines.push("Suele funcionar bien para una salida rapida");
+    lines.push("Suele funcionar bien para una salida rápida");
   }
 
   if (visits.some((visit) => visit.tags.includes("brunch"))) {
@@ -284,7 +284,7 @@ export function buildBestMoments(visits: VisitWithRelations[]) {
   }
 
   if (visits.filter((visit) => visit.wouldReturn === "yes").length >= 2) {
-    lines.push("La comunidad volveria por cafe y experiencia");
+    lines.push("La comunidad volvería por café y experiencia");
   }
 
   return lines.slice(0, 4);

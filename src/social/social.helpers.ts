@@ -197,7 +197,7 @@ export function buildFeedAppearanceReason(
     ).length;
 
     if (visit.wouldReturn === "yes" || visit.rating >= 4) {
-      return `${displayName} volveria`;
+      return `${displayName} volvería`;
     }
 
     if (tasteOverlap >= 2) {
@@ -265,7 +265,7 @@ export function buildFeedAppearanceReason(
   }
 
   if ((visit.waitLevel ?? 5) <= 2) {
-    return "Para una pausa rapida";
+    return "Para una pausa rápida";
   }
 
   if ((visit.noiseLevel ?? 5) <= 2) {
