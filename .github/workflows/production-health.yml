@@ -24,7 +24,7 @@ jobs:
             "${{ secrets.PRODUCTION_HEALTH_URL }}/internal/notifications/status"
 
       - name: Check host and latest backup
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.HETZNER_HOST }}
           username: ${{ secrets.HETZNER_SSH_USER }}
