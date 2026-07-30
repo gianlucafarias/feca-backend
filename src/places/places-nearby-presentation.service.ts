@@ -79,10 +79,7 @@ export class PlacesNearbyPresentationService {
     return places.map((place, index) => {
       const socialChips = socialMap.get(place.googlePlaceId) ?? [];
       const friendSocialRows = friendRowsMap.get(place.googlePlaceId) ?? [];
-      const openingChip = buildNearbyOpeningChip(
-        place.openNow,
-        place.openingWeekdayLines,
-      );
+      const openingChip = buildNearbyOpeningChip(place.openNow);
       const { openingWeekdayLines: _weekdayLines, ...rest } = place;
       const keepPhoto =
         (this.googleCache.shouldServeStoredNearbyPhotos() &&
@@ -181,5 +178,64 @@ export class PlacesNearbyPresentationService {
         ? { ...place, photoUrl: photoById.get(place.googlePlaceId) }
         : place,
     );
+  }
+
+  async hydrateMissingOpenNow(
+    places: GooglePlaceSummary[],
+    options: {
+      origin?: string;
+      priorityGoogleIds?: Set<string>;
+      budget?: number;
+    },
+  ): Promise<GooglePlaceSummary[]> {
+    if (places.length === 0) {
+      return places;
+    }
+
+    const budget = options.budget ?? 20;
+    const priority = options.priorityGoogleIds ?? new Set<string>();
+    const ordered = [
+      ...places.filter((place) => priority.has(place.googlePlaceId)),
+      ...places.filter((place) => !priority.has(place.googlePlaceId)),
+    ];
+    const toHydrate = ordered
+      .filter((place) => place.openNow === undefined && place.googlePlaceId)
+      .slice(0, budget);
+
+    if (toHydrate.length === 0) {
+      return places;
+    }
+
+    const patches = new Map<string, Partial<GooglePlaceSummary>>();
+
+    await Promise.all(
+      toHydrate.map(async (place) => {
+        if (this.googleCache.shouldUseGooglePlaces()) {
+          try {
+            const detail = await this.googleCache.getCachedPlaceDetailView(
+              place.googlePlaceId,
+              options.origin,
+            );
+            patches.set(place.googlePlaceId, {
+              openNow: detail.openNow,
+              openingWeekdayLines:
+                detail.openingWeekdayLines ?? place.openingWeekdayLines,
+            });
+            return;
+          } catch {
+            // Sin estado en tiempo real no inferimos con la zona horaria del servidor.
+          }
+        }
+      }),
+    );
+
+    if (patches.size === 0) {
+      return places;
+    }
+
+    return places.map((place) => {
+      const patch = patches.get(place.googlePlaceId);
+      return patch ? { ...place, ...patch } : place;
+    });
   }
 }

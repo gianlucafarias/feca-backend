@@ -1,6 +1,11 @@
 node_modules
 dist
+coverage
 .env
+.env.*
+!.env.example
 .git
 .railway
+.DS_Store
+plans
 npm-debug.log

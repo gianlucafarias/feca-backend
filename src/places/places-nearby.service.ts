@@ -200,9 +200,21 @@ export class PlacesNearbyService {
       };
       const curatedGoogleIdsForCity = cityCuration.curatedGoogleIds;
 
+      if (resolved.variant === "home_open_now") {
+        visibleCandidates =
+          await this.presentationService.hydrateMissingOpenNow(
+            visibleCandidates,
+            {
+              origin,
+              priorityGoogleIds: curatedGoogleIdsForCity,
+              budget: Math.max(resolved.limit * 4, 20),
+            },
+          );
+      }
+
       let work = visibleCandidates;
       if (resolved.variant === "home_open_now") {
-        work = visibleCandidates.filter((p) => p.openNow === true);
+        work = visibleCandidates.filter((place) => place.openNow === true);
         if (work.length === 0) {
           return { places: [] };
         }
@@ -240,7 +252,10 @@ export class PlacesNearbyService {
               recommendationSignals.dislikedVisitedPlaceCategoryIds,
             outingPreferences: recommendationSignals.outingPreferences,
             inferredIntent,
-            explicitExploreIntent: resolved.intent,
+            explicitExploreIntent:
+              resolved.variant === "home_open_now"
+                ? "open_now"
+                : resolved.intent,
             likedNearbyGooglePlaceIds: new Set(
               recommendationSignals.likedNearbyGooglePlaceIds,
             ),
@@ -260,7 +275,6 @@ export class PlacesNearbyService {
       const rankedPlaces = shouldPrependAdmin
         ? prependAdminCuratedPlaces(ranking.places, cityCuration.rows, {
             limit: resolved.limit,
-            requireOpenNow: resolved.variant === "home_open_now",
           })
         : ranking.places;
 

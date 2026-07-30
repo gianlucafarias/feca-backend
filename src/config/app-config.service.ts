@@ -23,6 +23,14 @@ export class AppConfigService {
     return this.configService.get("AUTH_JWT_ACCESS_SECRET", { infer: true });
   }
 
+  get authJwtIssuer() {
+    return this.configService.get("AUTH_JWT_ISSUER", { infer: true });
+  }
+
+  get authJwtAudience() {
+    return this.configService.get("AUTH_JWT_AUDIENCE", { infer: true });
+  }
+
   get authAccessTokenTtlMinutes() {
     return this.configService.get("AUTH_ACCESS_TOKEN_TTL_MINUTES", {
       infer: true,
@@ -61,6 +69,13 @@ export class AppConfigService {
     return this.configService.get("GOOGLE_DATA_PORTABILITY_REDIRECT_URI", {
       infer: true,
     });
+  }
+
+  get googleDataPortabilityTokenEncryptionKey() {
+    return this.configService.get(
+      "GOOGLE_DATA_PORTABILITY_TOKEN_ENCRYPTION_KEY",
+      { infer: true },
+    );
   }
 
   get googlePlacesCountry() {
@@ -180,14 +195,7 @@ export class AppConfigService {
 
   isFecaAdminUser(user: {
     email?: string | null;
-    sub?: string | null;
-    id?: string | null;
-    isAdminOverride?: boolean;
   }) {
-    if (user.email && this.isFecaAdminEmail(user.email)) {
-      return true;
-    }
-
-    return user.isAdminOverride === true;
+    return Boolean(user.email && this.isFecaAdminEmail(user.email));
   }
 }

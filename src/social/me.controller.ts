@@ -13,10 +13,7 @@ import {
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { PaginationQueryDto } from "../common/dto/pagination-query.dto";
 import { AccessTokenGuard } from "../common/guards/access-token.guard";
-import { AuthService } from "../auth/auth.service";
 import type { AccessTokenPayload } from "../auth/auth.types";
-import { PatchMeAdminDto } from "../auth/dto/patch-me-admin.dto";
-import { PatchMeEditorDto } from "../auth/dto/patch-me-editor.dto";
 import { UpdateSocialSettingsDto } from "./dto/update-social-settings.dto";
 import { ListNotificationsQueryDto } from "./dto/list-notifications.query.dto";
 import { UpdateTasteDto } from "./dto/update-taste.dto";
@@ -30,7 +27,6 @@ export class MeController {
   constructor(
     private readonly socialService: SocialService,
     private readonly notificationsService: NotificationsService,
-    private readonly authService: AuthService,
   ) {}
 
   @Get("visits")
@@ -152,27 +148,4 @@ export class MeController {
     return this.socialService.updateSocialSettings(user.sub, body);
   }
 
-  /**
-   * Preview de producto: cualquier usuario autenticado puede activar/desactivar
-   * su flag editor (sin panel de admin). Sustituir por flujo restringido cuando exista.
-   */
-  @Patch("editor")
-  patchMyEditor(
-    @CurrentUser() user: AccessTokenPayload,
-    @Body() body: PatchMeEditorDto,
-  ) {
-    return this.authService.setMyEditorFlag(user.sub, body.isEditor);
-  }
-
-  /**
-   * Preview de producto: override temporal en memoria para probar herramientas admin.
-   * Se pierde al reiniciar el proceso; reemplazar por permisos persistidos.
-   */
-  @Patch("admin")
-  patchMyAdmin(
-    @CurrentUser() user: AccessTokenPayload,
-    @Body() body: PatchMeAdminDto,
-  ) {
-    return this.authService.setMyAdminFlag(user.sub, body.isAdmin);
-  }
 }

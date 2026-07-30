@@ -1,13 +1,15 @@
 import {
   CallHandler,
   ExecutionContext,
+  HttpException,
   Injectable,
   NestInterceptor,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { Observable } from "rxjs";
-import { finalize } from "rxjs/operators";
+import { finalize, tap } from "rxjs/operators";
 
+import { getSafeRequestPath } from "../http/safe-request-path";
 import { writeStructuredLog } from "../logging/structured-logger";
 import { getRequestContext } from "../request-context/request-context.storage";
 import { HttpMetricsService } from "./http-metrics.service";
@@ -23,18 +25,33 @@ export class HttpMetricsInterceptor implements NestInterceptor {
     const http = context.switchToHttp();
     const request = http.getRequest<Request>();
     const response = http.getResponse<Response>();
-    const path = request.originalUrl ?? request.url;
+    const path = getSafeRequestPath(request);
     let recorded = false;
+    let errorStatusCode: number | undefined;
 
     const recordOnce = () => {
       if (recorded) {
         return;
       }
       recorded = true;
-      this.recordRequest(request, response, startedAt, path);
+      this.recordRequest(
+        request,
+        response,
+        startedAt,
+        path,
+        errorStatusCode,
+      );
     };
 
-    return next.handle().pipe(finalize(() => recordOnce()));
+    return next.handle().pipe(
+      tap({
+        error: (error: unknown) => {
+          errorStatusCode =
+            error instanceof HttpException ? error.getStatus() : 500;
+        },
+      }),
+      finalize(() => recordOnce()),
+    );
   }
 
   private recordRequest(
@@ -42,6 +59,7 @@ export class HttpMetricsInterceptor implements NestInterceptor {
     response: Response,
     startedAt: number,
     path: string,
+    errorStatusCode?: number,
   ) {
     if (this.shouldSkip(path)) {
       return;
@@ -49,7 +67,7 @@ export class HttpMetricsInterceptor implements NestInterceptor {
 
     const durationMs = Date.now() - startedAt;
     const route = normalizeRoute(request);
-    const statusCode = response.statusCode || 500;
+    const statusCode = errorStatusCode ?? response.statusCode ?? 500;
     const method = request.method;
 
     this.httpMetrics.record({

@@ -223,7 +223,8 @@ model User {
    */
   isEditor           Boolean            @default(false)
   /**
-   * Override de admin de preview (persistente). Complementa `FECA_ADMIN_EMAILS`.
+   * Campo legacy; no participa en autorización. Los administradores se definen
+   * exclusivamente mediante `FECA_ADMIN_EMAILS`.
    */
   isAdminOverride    Boolean            @default(false)
   placeCurations     PlaceCuration[]    @relation("PlaceCurationCreator")

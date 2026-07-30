@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   },
   "scripts": {
     "start:dev": "nest start --watch",
@@ -12,6 +12,7 @@
     "start": "node dist/main.js",
     "start:prod": "node dist/main.js",
     "check": "tsc --noEmit -p tsconfig.build.json",
+    "release:check": "npm run check && npm run test && npm run test:coverage && npm run build && npm audit --omit=dev",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -37,6 +38,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "google-auth-library": "^10.6.2",
+    "helmet": "^8.3.0",
     "ioredis": "^5.11.1",
     "keyv": "^5.6.0",
     "pg-boss": "^10.4.2",

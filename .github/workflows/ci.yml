@@ -8,27 +8,31 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
 
       - run: npm ci
 
-      - run: npm run check
+      - run: npm run release:check
 
-      - run: npm run test
-
-      - run: npm run test:coverage
+      - name: Build production image
+        run: docker build --tag feca-backend:ci .
 
   deploy-hetzner:
     needs: check
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: production
+    concurrency:
+      group: feca-production
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write

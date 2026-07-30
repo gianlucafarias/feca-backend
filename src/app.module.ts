@@ -10,6 +10,7 @@ import { ThrottlerStorageRedisService } from "@nest-lab/throttler-storage-redis"
 import type Redis from "ioredis";
 
 import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
+import { HttpMetricsController } from "./common/metrics/http-metrics.controller";
 import { HttpMetricsInterceptor } from "./common/metrics/http-metrics.interceptor";
 import { HttpMetricsService } from "./common/metrics/http-metrics.service";
 import { RequestContextMiddleware } from "./common/request-context/request-context.middleware";
@@ -31,6 +32,7 @@ import { SocialModule } from "./social/social.module";
 import { VisitsModule } from "./visits/visits.module";
 
 @Module({
+  controllers: [HttpMetricsController],
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,

@@ -1,7 +1,12 @@
 import "reflect-metadata";
 
-import { UnprocessableEntityException, ValidationPipe } from "@nestjs/common";
+import {
+  ForbiddenException,
+  UnprocessableEntityException,
+  ValidationPipe,
+} from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
+import helmet from "helmet";
 
 import { AppModule } from "./app.module";
 import {
@@ -12,17 +17,13 @@ import {
 import { AppConfigService } from "./config/app-config.service";
 
 function createCorsOriginMatcher(allowedOrigins: string[]) {
-  if (allowedOrigins.length === 0) {
-    return true;
-  }
-
   return (origin: string | undefined, callback: (error: Error | null, allow?: boolean) => void) => {
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
       return;
     }
 
-    callback(new Error(`Origin ${origin} is not allowed by CORS`), false);
+    callback(new ForbiddenException("Origin is not allowed by CORS"), false);
   };
 }
 
@@ -34,6 +35,8 @@ async function bootstrap() {
   app.enableShutdownHooks();
 
   const config = app.get(AppConfigService);
+  app.getHttpAdapter().getInstance().disable("x-powered-by");
+  app.use(helmet());
 
   if (shouldUseStructuredLogger(config.nodeEnv)) {
     app.useLogger(new StructuredLogger());
@@ -58,6 +61,10 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
       transformOptions: {
         enableImplicitConversion: true,
+      },
+      validationError: {
+        target: false,
+        value: false,
       },
     }),
   );

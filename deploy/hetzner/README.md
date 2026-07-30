@@ -7,6 +7,11 @@ Production stack for self-hosted Hetzner. **Do not commit `.env`** (secrets stay
 - Full runbook: [docs/hetzner-production.md](../../docs/hetzner-production.md)
 - CI deploy: merge to `main` → GitHub Actions builds GHCR image and SSH deploys
 
+`deploy.sh` persists a new image only after `/health/ready` succeeds. If the
+new container fails readiness and a previous image is configured, it rolls the
+application back automatically. Database migrations are not rolled back, so
+every production migration must remain compatible with the previous image.
+
 ## First-time on server
 
 ```bash
@@ -26,8 +31,15 @@ scripts/
   bootstrap-server.sh
   deploy.sh
   backup-postgres.sh
+  check-backup-health.sh
+  check-host-health.sh
   restore-postgres.sh
   cron-notifications.sh
   install-backup-cron.sh
 backups/             # created on server (gitignored)
 ```
+
+The scheduled production workflow validates readiness, push-delivery health,
+all three Docker services, disk usage, and the age/integrity of the latest
+database backup. Configure `PRODUCTION_INTERNAL_SECRET` with the same value as
+the server's `INTERNAL_NOTIFICATIONS_SECRET`.

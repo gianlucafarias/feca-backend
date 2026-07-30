@@ -1,6 +1,7 @@
 # Observability
 
-How FECA backend exposes logs, request correlation, health checks, and basic HTTP metrics.
+How FECA backend exposes logs, request correlation, health checks, HTTP
+metrics, queue health, and host-level launch checks.
 
 ## Structured logs
 
@@ -62,7 +63,51 @@ When `REDIS_URL` is set, `/health/ready` also checks Redis with `PING`.
 
 Health routes are excluded from request completion logs to reduce noise.
 
-These metrics are in memory (per replica). Export to Prometheus/Datadog is planned when needed.
+These metrics are in memory (per replica). Operators can inspect the current
+instance through:
+
+```bash
+curl -fsS https://api.example.com/internal/metrics/http \
+  -H "x-feca-internal-secret: $INTERNAL_NOTIFICATIONS_SECRET"
+```
+
+The endpoint fails closed without the configured internal secret. Metrics
+reset when the process restarts and remain per-replica; they are useful for
+launch diagnostics, not long-term retention.
+
+## Notification pipeline health
+
+`GET /internal/notifications/status` reports:
+
+- queue backend, startup state, and registered worker count;
+- delivery totals by status;
+- pending deliveries older than 20 minutes;
+- Expo tickets still unresolved after 24 hours;
+- oldest pending and latest delivered timestamps.
+
+It returns `503` when the queue is unavailable, a pending delivery is stalled,
+or an Expo ticket is stale. The scheduled production workflow checks it every
+10 minutes.
+
+## Host and backup checks
+
+The same scheduled workflow connects over SSH and runs
+`deploy/hetzner/scripts/check-host-health.sh`. It fails when:
+
+- backend, Caddy, or Postgres is not running;
+- disk usage reaches `DISK_MAX_PERCENT` (85 by default);
+- no backup exists;
+- the latest backup is empty, corrupt, or older than
+  `BACKUP_MAX_AGE_HOURS` (30 by default).
+
+GitHub Actions notifications must be enabled for the repository owners so a
+failed workflow becomes an operator alert.
+
+## Remaining external integration
+
+Production crash reporting and searchable log retention require an external
+provider such as Sentry or a log collector. They are not marked configured
+until a real account, retention policy, and alert recipient are verified.
 
 ## Error logging
 

@@ -50,6 +50,7 @@ export class SocialDiariesService {
     const result = await this.socialRepository.searchPublicDiaries({
       ...query,
       q: normalizedQuery,
+      viewerId: userId,
     });
 
     const sorted = [...result.diaries].sort((left, right) => {
@@ -85,6 +86,13 @@ export class SocialDiariesService {
 
     if (!profile) {
       throw new NotFoundException("User not found");
+    }
+
+    if (!profile.permissions.canViewDiaries) {
+      return {
+        diaries: [],
+        total: 0,
+      };
     }
 
     const diaries = filterVisibleDiaries(
@@ -132,8 +140,11 @@ export class SocialDiariesService {
     };
   }
 
-  async listHomeEditorGuides(limit: number) {
-    const { diaries, total } = await this.socialRepository.listHomeEditorGuides(limit);
+  async listHomeEditorGuides(viewerId: string, limit: number) {
+    const { diaries, total } = await this.socialRepository.listHomeEditorGuides(
+      viewerId,
+      limit,
+    );
     return {
       diaries: diaries.map(serializeDiary),
       total,
@@ -148,6 +159,16 @@ export class SocialDiariesService {
 
     if (!canViewDiary(viewerId, diary, true)) {
       throw new ForbiddenException("Diary is private");
+    }
+
+    if (viewerId !== diary.createdById) {
+      const owner = await this.socialRepository.findUserByIdWithContext(
+        viewerId,
+        diary.createdById,
+      );
+      if (!owner?.permissions.canViewDiaries) {
+        throw new NotFoundException("Diary not found");
+      }
     }
 
     return {

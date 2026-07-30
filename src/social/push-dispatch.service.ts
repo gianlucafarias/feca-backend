@@ -2,6 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 
 import { AppConfigService } from "../config/app-config.service";
+import { fetchWithTimeout } from "../common/http/fetch-with-timeout";
 import { PrismaService } from "../database/prisma.service";
 import { serializeNotification } from "../lib/api-presenters";
 import { QueueService } from "../infrastructure/queue/queue.service";
@@ -13,6 +14,8 @@ const EXPO_CHANNEL_ID = "feca-default";
 const MAX_SEND_BATCH_SIZE = 100;
 const MAX_RECEIPT_BATCH_SIZE = 300;
 const MAX_SEND_ATTEMPTS = 5;
+const STALLED_PENDING_AFTER_MS = 20 * 60 * 1000;
+const STALE_TICKET_AFTER_MS = 24 * 60 * 60 * 1000;
 
 const deliveryInclude = Prisma.validator<Prisma.PushDeliveryInclude>()({
   installation: {
@@ -91,6 +94,72 @@ export class PushDispatchService {
       { limit },
       { singletonKey: "push-dispatch" },
     );
+  }
+
+  async getOperationalStatus(now = new Date()) {
+    const stalledPendingBefore = new Date(
+      now.getTime() - STALLED_PENDING_AFTER_MS,
+    );
+    const staleTicketBefore = new Date(now.getTime() - STALE_TICKET_AFTER_MS);
+
+    const [
+      statusGroups,
+      stalledPending,
+      staleTicketed,
+      oldestPending,
+      latestDelivered,
+    ] = await Promise.all([
+      this.prisma.pushDelivery.groupBy({
+        by: ["status"],
+        _count: { _all: true },
+      }),
+      this.prisma.pushDelivery.count({
+        where: {
+          scheduledFor: { lte: stalledPendingBefore },
+          status: "pending",
+        },
+      }),
+      this.prisma.pushDelivery.count({
+        where: {
+          sentAt: { lte: staleTicketBefore },
+          status: "ticketed",
+        },
+      }),
+      this.prisma.pushDelivery.findFirst({
+        where: { status: "pending" },
+        orderBy: [{ scheduledFor: "asc" }, { createdAt: "asc" }],
+        select: { scheduledFor: true },
+      }),
+      this.prisma.pushDelivery.findFirst({
+        where: { status: "delivered" },
+        orderBy: [{ deliveredAt: "desc" }],
+        select: { deliveredAt: true },
+      }),
+    ]);
+
+    const counts = {
+      cancelled: 0,
+      delivered: 0,
+      failed: 0,
+      pending: 0,
+      ticketed: 0,
+    };
+    for (const group of statusGroups) {
+      counts[group.status] = group._count._all;
+    }
+
+    return {
+      counts,
+      healthy: stalledPending === 0 && staleTicketed === 0,
+      latestDeliveredAt: latestDelivered?.deliveredAt?.toISOString() ?? null,
+      oldestPendingAt: oldestPending?.scheduledFor.toISOString() ?? null,
+      staleTicketed,
+      stalledPending,
+      thresholds: {
+        pendingMinutes: STALLED_PENDING_AFTER_MS / 60_000,
+        ticketHours: STALE_TICKET_AFTER_MS / 3_600_000,
+      },
+    };
   }
 
   async dispatchPending(limit = 100) {
@@ -399,7 +468,7 @@ export class PushDispatchService {
       headers.Authorization = `Bearer ${this.config.expoAccessToken}`;
     }
 
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       body: JSON.stringify(body),
       headers,
       method: "POST",

@@ -1,5 +1,9 @@
 import { Injectable } from "@nestjs/common";
-import { AuthProvider, Prisma, type Session, type User } from "@prisma/client";
+import {
+  AuthProvider,
+  Prisma,
+  type GroupInvitePolicy,
+} from "@prisma/client";
 import { randomInt } from "node:crypto";
 
 import { PrismaService } from "../database/prisma.service";
@@ -156,6 +160,10 @@ export class AuthRepository {
   updateUserProfile(
     userId: string,
     input: UpdateUserProfileInput & { cityId?: string },
+    settingsInput?: {
+      groupInvitePolicy?: GroupInvitePolicy;
+      pushEnabled?: boolean;
+    },
   ) {
     const data: Prisma.UserUncheckedUpdateInput = {};
 
@@ -187,33 +195,24 @@ export class AuthRepository {
           : (input.outingPreferences as Prisma.InputJsonValue);
     }
 
-    return this.prisma.user.update({
-      where: { id: userId },
-      data,
-      include: {
-        cityRef: true,
-      },
-    });
-  }
+    return this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.update({
+        where: { id: userId },
+        data,
+        include: {
+          cityRef: true,
+        },
+      });
+      const settings = await tx.userSettings.upsert({
+        where: { userId },
+        update: settingsInput ?? {},
+        create: {
+          userId,
+          ...settingsInput,
+        },
+      });
 
-  updateUserIsEditor(userId: string, isEditor: boolean) {
-    return this.prisma.user.update({
-      where: { id: userId },
-      data: { isEditor },
-    });
-  }
-
-  updateUserIsAdminOverride(userId: string, isAdminOverride: boolean) {
-    return this.prisma.user.update({
-      where: { id: userId },
-      data: { isAdminOverride },
-    });
-  }
-
-  findUserAdminOverride(userId: string) {
-    return this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { isAdminOverride: true },
+      return { settings, user };
     });
   }
 
@@ -235,6 +234,50 @@ export class AuthRepository {
     });
   }
 
+  async rotateActiveSession(
+    previousSessionId: string,
+    input: {
+      expiresAt: Date;
+      ipAddress?: string;
+      refreshTokenHash: string;
+      userAgent?: string;
+      userId: string;
+    },
+  ): Promise<boolean> {
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        const revoked = await tx.session.updateMany({
+          where: {
+            expiresAt: {
+              gt: new Date(),
+            },
+            id: previousSessionId,
+            revokedAt: null,
+          },
+          data: {
+            revokedAt: new Date(),
+          },
+        });
+
+        if (revoked.count !== 1) {
+          throw new SessionRotationConflictError();
+        }
+
+        await tx.session.create({
+          data: input,
+        });
+      });
+
+      return true;
+    } catch (error) {
+      if (error instanceof SessionRotationConflictError) {
+        return false;
+      }
+
+      throw error;
+    }
+  }
+
   findActiveSessionByRefreshTokenHash(refreshTokenHash: string) {
     return this.prisma.session.findFirst({
       where: {
@@ -246,18 +289,6 @@ export class AuthRepository {
       },
       include: {
         user: true,
-      },
-    });
-  }
-
-  revokeSessionById(sessionId: string) {
-    return this.prisma.session.updateMany({
-      where: {
-        id: sessionId,
-        revokedAt: null,
-      },
-      data: {
-        revokedAt: new Date(),
       },
     });
   }
@@ -301,6 +332,8 @@ export class AuthRepository {
     }
   }
 }
+
+class SessionRotationConflictError extends Error {}
 
 function sanitizeUsername(value: string) {
   const normalized = value

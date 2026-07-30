@@ -1,7 +1,11 @@
-node_modules
-dist
-.env
-.railway
+node_modules/
+dist/
+coverage/
 
 .env
+.env.local
+.railway/
 deploy/oci/.env
+
+.DS_Store
+*.log

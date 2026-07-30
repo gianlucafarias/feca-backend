@@ -6,7 +6,9 @@ import {
   HttpStatus,
 } from "@nestjs/common";
 import type { Request } from "express";
+import { randomUUID } from "node:crypto";
 
+import { getSafeRequestPath } from "../http/safe-request-path";
 import { writeStructuredLog } from "../logging/structured-logger";
 import { getRequestContext } from "../request-context/request-context.storage";
 
@@ -16,8 +18,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const context = host.switchToHttp();
     const response = context.getResponse();
     const request = context.getRequest<Request>();
-    const path = request.originalUrl ?? request.url;
+    const path = getSafeRequestPath(request);
     const nodeEnv = process.env.NODE_ENV ?? "development";
+    const requestId = getRequestContext()?.requestId ?? randomUUID();
+    response.setHeader("X-Request-Id", requestId);
 
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
@@ -27,19 +31,35 @@ export class AllExceptionsFilter implements ExceptionFilter {
           ? exceptionResponse
           : { message: exceptionResponse };
 
-      const message =
+      const rawMessage =
         typeof normalized === "object" &&
         normalized !== null &&
         "message" in normalized
           ? normalized.message
           : "Request failed";
+      const message = sanitizeHttpMessage(rawMessage, {
+        method: request.method,
+        path,
+        requestUrl: request.url,
+        status,
+      });
 
       if (status >= 500) {
         this.logHttpError({
           exception,
+          requestId,
           path,
           statusCode: status,
           nodeEnv,
+        });
+
+        return response.status(status).json({
+          message:
+            "El servicio no está disponible en este momento. Inténtalo de nuevo más tarde.",
+          statusCode: status,
+          path,
+          timestamp: new Date().toISOString(),
+          requestId,
         });
       }
 
@@ -49,29 +69,32 @@ export class AllExceptionsFilter implements ExceptionFilter {
         statusCode: status,
         path,
         timestamp: new Date().toISOString(),
-        requestId: getRequestContext()?.requestId,
+        requestId,
       });
     }
 
     this.logHttpError({
       exception,
+      requestId,
       path,
       statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
       nodeEnv,
     });
 
     return response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
-      message: "Internal server error",
+      message:
+        "El servicio no está disponible en este momento. Inténtalo de nuevo más tarde.",
       statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
       path,
       timestamp: new Date().toISOString(),
-      requestId: getRequestContext()?.requestId,
+      requestId,
     });
   }
 
   private logHttpError(input: {
     exception: unknown;
     path: string;
+    requestId: string;
     statusCode: number;
     nodeEnv: string;
   }) {
@@ -81,6 +104,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       : undefined;
 
     writeStructuredLog("error", "http_request_failed", {
+      requestId: input.requestId,
       path: input.path,
       statusCode: input.statusCode,
       durationMs,
@@ -100,4 +124,33 @@ export class AllExceptionsFilter implements ExceptionFilter {
             }),
     });
   }
+}
+
+export function sanitizeHttpMessage(
+  message: unknown,
+  request: {
+    method: string;
+    path: string;
+    requestUrl: string;
+    status: number;
+  },
+): unknown {
+  if (Array.isArray(message)) {
+    return message.map((entry) => sanitizeHttpMessage(entry, request));
+  }
+
+  if (typeof message !== "string") {
+    return message;
+  }
+
+  if (
+    request.status === HttpStatus.NOT_FOUND &&
+    message.startsWith(`Cannot ${request.method} `)
+  ) {
+    return `Cannot ${request.method} ${request.path}`;
+  }
+
+  return request.requestUrl && request.requestUrl !== request.path
+    ? message.replaceAll(request.requestUrl, request.path)
+    : message;
 }
