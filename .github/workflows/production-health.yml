@@ -2,7 +2,9 @@ name: Production health
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    # The backend remains monitored while the mobile app is not yet active,
+    # without consuming a runner every ten minutes.
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 jobs:
@@ -17,6 +19,7 @@ jobs:
             "${{ secrets.PRODUCTION_HEALTH_URL }}/health/ready"
 
       - name: Check notification delivery pipeline
+        if: ${{ vars.ENABLE_PUSH_HEALTH_CHECK == 'true' }}
         run: |
           curl -fsS --connect-timeout 5 --max-time 15 \
             --retry 3 --retry-delay 5 --retry-all-errors \
@@ -24,6 +27,7 @@ jobs:
             "${{ secrets.PRODUCTION_HEALTH_URL }}/internal/notifications/status"
 
       - name: Check host and latest backup
+        if: ${{ always() }}
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.HETZNER_HOST }}
