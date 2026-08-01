@@ -6,6 +6,7 @@ import { InfrastructureModule } from "../infrastructure/infrastructure.module";
 import { PlacesModule } from "../places/places.module";
 import { DiariesController } from "./diaries.controller";
 import { FeedController } from "./feed.controller";
+import { GroupInvitesController } from "./group-invites.controller";
 import { HomeController } from "./home.controller";
 import { GroupsController } from "./groups.controller";
 import { InternalNotificationsController } from "./internal-notifications.controller";
@@ -31,6 +32,7 @@ import { UsersController } from "./users.controller";
   controllers: [
     DiariesController,
     FeedController,
+    GroupInvitesController,
     GroupsController,
     HomeController,
     InternalNotificationsController,

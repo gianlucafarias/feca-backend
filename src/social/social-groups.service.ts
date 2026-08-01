@@ -123,6 +123,20 @@ export class SocialGroupsService {
     };
   }
 
+  /** Vista pública mínima para que un enlace compartido pueda abrirse en la web. */
+  async getGroupInvitePreview(code: string) {
+    const normalizedCode = code.trim().toUpperCase();
+    const group = await this.socialRepository.findGroupByInviteCode(normalizedCode);
+
+    if (!group) {
+      throw new NotFoundException("Invitation not found");
+    }
+
+    return {
+      group: serializeGroup(group, { publicPreview: true }),
+    };
+  }
+
   async getGroup(userId: string, groupId: string) {
     const group = await this.socialRepository.findGroupById(groupId);
     if (!group) {
