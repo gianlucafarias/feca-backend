@@ -20,10 +20,15 @@ export class GoogleIdentityService {
       throw new UnauthorizedException("Google OAuth is not configured");
     }
 
-    const ticket = await this.client.verifyIdToken({
-      audience,
-      idToken,
-    });
+    let ticket;
+    try {
+      ticket = await this.client.verifyIdToken({
+        audience,
+        idToken,
+      });
+    } catch {
+      throw new UnauthorizedException("Invalid Google token");
+    }
     const payload = ticket.getPayload();
 
     if (!payload?.sub || !payload.email) {
