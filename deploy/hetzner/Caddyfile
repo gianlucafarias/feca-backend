@@ -17,3 +17,28 @@
 
   tls {$LETSENCRYPT_EMAIL}
 }
+
+feca.cc, www.feca.cc {
+  encode gzip zstd
+
+  @www host www.feca.cc
+  redir @www https://feca.cc{uri} permanent
+
+  root * /srv/web
+  try_files {path} /index.html
+  file_server
+
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    Referrer-Policy "strict-origin-when-cross-origin"
+  }
+
+  log {
+    output stdout
+    format console
+  }
+
+  tls {$LETSENCRYPT_EMAIL}
+}
