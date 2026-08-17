@@ -104,6 +104,7 @@ enum NotificationType {
   group_join_approved
   group_join_rejected
   group_message
+  group_report
   group_event_proposed
   group_event_rsvp
   visit_created

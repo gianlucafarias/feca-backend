@@ -102,6 +102,18 @@ export function buildNotificationPresentation(
       const groupName = readNotificationString(data, "groupName") ?? "un plan";
       return { body: `Hay un mensaje nuevo en ${groupName}`, deepLink: groupId ? `/group/${groupId}/chat` : null, title: "Mensaje nuevo" };
     }
+    case "group_report": {
+      const groupId = readNotificationString(data, "groupId") ?? entity?.id ?? null;
+      const groupName = readNotificationString(data, "groupName") ?? "tu plan";
+      const reason = readNotificationString(data, "reason");
+      return {
+        body: reason
+          ? `${actorName} reportó ${groupName}: ${reason}`
+          : `${actorName} reportó ${groupName}`,
+        deepLink: groupId ? `/group/${groupId}` : null,
+        title: "Plan reportado",
+      };
+    }
     case "group_event_proposed": {
       const groupId = readNotificationString(data, "groupId") ?? null;
       const groupName = readNotificationString(data, "groupName") ?? "tu plan";

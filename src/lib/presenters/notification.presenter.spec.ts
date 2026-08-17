@@ -52,5 +52,17 @@ describe("buildNotificationPresentation", () => {
         null,
       ).deepLink,
     ).toBe("/group/plan-1/chat");
+    expect(
+      buildNotificationPresentation(
+        "group_report",
+        null,
+        { groupId: "plan-1", groupName: "Café Central", reason: "Spam" },
+        null,
+      ),
+    ).toMatchObject({
+      body: "Alguien reportó Café Central: Spam",
+      deepLink: "/group/plan-1",
+      title: "Plan reportado",
+    });
   });
 });

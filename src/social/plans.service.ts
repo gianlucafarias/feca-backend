@@ -26,6 +26,7 @@ import { SocialGroupEventsService } from "./social-group-events.service";
 import { generateInviteCode } from "./social.helpers";
 import { CreatePlanDto } from "./dto/create-plan.dto";
 import { CreatePlanMessageDto } from "./dto/create-plan-message.dto";
+import { CreatePlanReportDto } from "./dto/create-plan-report.dto";
 import { DiscoverPlansQueryDto } from "./dto/discover-plans.query.dto";
 import { ListPlanMessagesQueryDto } from "./dto/list-plan-messages.query.dto";
 import { UpdatePlanDto } from "./dto/update-plan.dto";
@@ -268,6 +269,25 @@ export class PlansService {
       );
     }
     return { left: true };
+  }
+
+  async report(userId: string, groupId: string, body: CreatePlanReportDto) {
+    const plan = await this.requirePlan(groupId);
+    const recipients = await this.adminIds(groupId, userId);
+    if (recipients.length > 0) {
+      await this.notificationsService.publish({
+        actorId: userId,
+        entity: { id: groupId, type: "group" },
+        payload: {
+          groupId,
+          groupName: plan.name,
+          reason: body.reason.trim(),
+        },
+        recipientIds: recipients,
+        type: "group_report",
+      });
+    }
+    return { reported: true };
   }
 
   async listJoinRequests(userId: string, groupId: string) {

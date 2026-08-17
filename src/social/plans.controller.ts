@@ -16,6 +16,7 @@ import { AccessTokenGuard } from "../common/guards/access-token.guard";
 import type { AccessTokenPayload } from "../auth/auth.types";
 import { CreatePlanDto } from "./dto/create-plan.dto";
 import { CreatePlanMessageDto } from "./dto/create-plan-message.dto";
+import { CreatePlanReportDto } from "./dto/create-plan-report.dto";
 import { DiscoverPlansQueryDto } from "./dto/discover-plans.query.dto";
 import { ListPlanMessagesQueryDto } from "./dto/list-plan-messages.query.dto";
 import { UpdatePlanDto } from "./dto/update-plan.dto";
@@ -59,6 +60,15 @@ export class PlansController {
   @Post(":id/leave")
   leave(@CurrentUser() user: AccessTokenPayload, @Param("id") groupId: string) {
     return this.plansService.leave(user.sub, groupId);
+  }
+
+  @Post(":id/report")
+  report(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param("id") groupId: string,
+    @Body() body: CreatePlanReportDto,
+  ) {
+    return this.plansService.report(user.sub, groupId, body);
   }
 
   @Get(":id/join-requests")
