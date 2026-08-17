@@ -2,7 +2,7 @@ import {
   BadRequestException,
   UnprocessableEntityException,
 } from "@nestjs/common";
-import { GroupEventStatus, GuideVisibility } from "@prisma/client";
+import { GroupEventStatus, GroupMemberStatus, GuideVisibility } from "@prisma/client";
 import { randomBytes } from "node:crypto";
 
 import { distanceInMeters } from "../lib/geo";
@@ -327,7 +327,7 @@ export function scoreDiarySearchMatch(
 export function buildAcceptedGroupMemberRecipientIds(
   group: {
     members: Array<{
-      status: "accepted" | "pending" | "declined" | "left";
+      status: GroupMemberStatus;
       userId: string;
     }>;
   },
@@ -345,7 +345,7 @@ export function buildGroupAdminRecipientIds(
   group: {
     members: Array<{
       role: "owner" | "admin" | "member";
-      status: "accepted" | "pending" | "declined" | "left";
+      status: GroupMemberStatus;
       userId: string;
     }>;
   },
@@ -367,7 +367,7 @@ export function buildGroupEventRsvpRecipientIds(
   group: {
     members: Array<{
       role: "owner" | "admin" | "member";
-      status: "accepted" | "pending" | "declined" | "left";
+      status: GroupMemberStatus;
       userId: string;
     }>;
   },

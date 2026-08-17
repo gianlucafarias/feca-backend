@@ -201,7 +201,7 @@ export class SocialGroupEventsService {
       });
     }
 
-    if (membership.status === "pending") {
+    if (membership.status === "pending" || membership.status === "requested") {
       throw new ForbiddenException({
         code: "GROUP_INVITE_PENDING",
         message: "Acepta la invitación antes de interactuar con el plan.",

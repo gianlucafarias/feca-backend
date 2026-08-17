@@ -34,11 +34,19 @@ enum GroupEventStatus {
   announcement
   confirmed
   completed
+  cancelled
 }
 
 enum GroupVisibility {
   private
   public_followers
+  public
+}
+
+enum GroupJoinPolicy {
+  open
+  request_approval
+  invite_only
 }
 
 enum PlaceProposalPolicy {
@@ -59,6 +67,7 @@ enum GroupMemberRole {
 
 enum GroupMemberStatus {
   pending
+  requested
   accepted
   declined
   left
@@ -91,6 +100,10 @@ enum NotificationType {
   follow
   group_invite
   group_joined
+  group_join_request
+  group_join_approved
+  group_join_rejected
+  group_message
   group_event_proposed
   group_event_rsvp
   visit_created
@@ -213,6 +226,7 @@ model User {
   groupInvitesSent   GroupMember[]      @relation("GroupInviteSender")
   eventsProposed     GroupEvent[]       @relation("GroupEventProposer")
   eventRsvps         GroupEventRsvp[]
+  groupMessages      GroupMessage[]     @relation("GroupMessageAuthor")
   diaries            Diary[]            @relation("DiaryCreator")
   notifications      Notification[]     @relation("UserNotifications")
   notificationsSent  Notification[]     @relation("NotificationActor")
@@ -424,9 +438,11 @@ model PlaceSave {
 model Group {
   id                        String                    @id @default(cuid())
   name                      String
+  description               String?
   createdById               String
   inviteCode                String                    @unique
   visibility                GroupVisibility           @default(private)
+  joinPolicy                GroupJoinPolicy           @default(invite_only)
   placeProposalPolicy       PlaceProposalPolicy       @default(all_members)
   memberProposalInteraction MemberProposalInteraction @default(collaborative)
   createdAt                 DateTime                  @default(now())
@@ -434,9 +450,11 @@ model Group {
   createdBy                 User                      @relation("GroupCreator", fields: [createdById], references: [id], onDelete: Cascade)
   members                   GroupMember[]
   events                    GroupEvent[]
+  messages                  GroupMessage[]
 
   @@index([createdById, createdAt(sort: Desc)])
   @@index([visibility, createdAt(sort: Desc)])
+  @@index([visibility, joinPolicy, createdAt(sort: Desc)])
 }
 
 model GroupMember {
@@ -472,6 +490,21 @@ model GroupEvent {
   rsvps        GroupEventRsvp[]
 
   @@index([groupId, createdAt(sort: Desc)])
+  @@index([date, status, groupId])
+}
+
+model GroupMessage {
+  id        String   @id @default(cuid())
+  groupId   String
+  authorId  String
+  body      String
+  createdAt DateTime @default(now())
+  deletedAt DateTime?
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  author    User     @relation("GroupMessageAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([groupId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([authorId, createdAt(sort: Desc)])
 }
 
 model GroupEventRsvp {

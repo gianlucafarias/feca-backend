@@ -19,7 +19,10 @@ export function computeGroupEventCapabilityFlags(
   group: GroupEventCapabilityContext,
   event: Pick<GroupEvent, "proposedById" | "status">,
 ) {
-  if (event.status === GroupEventStatus.completed) {
+  if (
+    event.status === GroupEventStatus.completed ||
+    event.status === GroupEventStatus.cancelled
+  ) {
     return {
       allowsConfirm: false,
       allowsCounterProposals: false,
@@ -111,12 +114,14 @@ export function serializeGroup(
     ? group.members.find((member) => member.userId === options.viewerUserId)
     : undefined;
 
-  const viewerMembership: "active" | "invited" | "none" | undefined = options?.publicPreview
+  const viewerMembership: "active" | "invited" | "requested" | "none" | undefined = options?.publicPreview
     ? "none"
     : myMembership?.status === "accepted"
       ? "active"
       : myMembership?.status === "pending"
         ? "invited"
+        : myMembership?.status === "requested"
+          ? "requested"
         : myMembership
           ? "none"
           : undefined;
@@ -237,6 +242,8 @@ function mapGroupMemberStatus(status: GroupMember["status"]) {
       return "active";
     case "pending":
       return "invited";
+    case "requested":
+      return "requested";
     default:
       return status;
   }

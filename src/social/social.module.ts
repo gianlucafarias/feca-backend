@@ -15,8 +15,10 @@ import { NotificationsAutomationService } from "./notifications-automation.servi
 import { OnboardingController } from "./onboarding.controller";
 import { NotificationsService } from "./notifications.service";
 import { PlaceSavesController } from "./place-saves.controller";
+import { PlansController } from "./plans.controller";
 import { PushDispatchService } from "./push-dispatch.service";
 import { PushDispatchWorker } from "./push-dispatch.worker";
+import { PlansService } from "./plans.service";
 import { SocialDiariesService } from "./social-diaries.service";
 import { SocialFeedService } from "./social-feed.service";
 import { SocialGroupEventsService } from "./social-group-events.service";
@@ -39,6 +41,7 @@ import { UsersController } from "./users.controller";
     MeController,
     OnboardingController,
     PlaceSavesController,
+    PlansController,
     TasteController,
     UsersController,
   ],
@@ -52,6 +55,7 @@ import { UsersController } from "./users.controller";
     SocialSavesService,
     SocialGroupEventsService,
     SocialGroupsService,
+    PlansService,
     SocialDiariesService,
     SocialService,
   ],

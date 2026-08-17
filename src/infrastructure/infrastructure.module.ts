@@ -5,6 +5,7 @@ import { GooglePlacesClient } from "./google-places/google-places.client";
 import { CitiesRepository } from "./repositories/cities.repository";
 import { NotificationsRepository } from "./repositories/notifications.repository";
 import { PlaceCurationRepository } from "./repositories/place-curation.repository";
+import { PlansRepository } from "./repositories/plans.repository";
 import { PlacesRepository } from "./repositories/places.repository";
 import { SocialDiariesRepository } from "./repositories/social/social-diaries.repository";
 import { SocialFeedRepository } from "./repositories/social/social-feed.repository";
@@ -24,6 +25,7 @@ import { VisitPlaceTagsRepository } from "./repositories/visit-place-tags.reposi
     CitiesRepository,
     NotificationsRepository,
     PlaceCurationRepository,
+    PlansRepository,
     PlacesRepository,
     SocialRepositorySupport,
     SocialFeedRepository,
@@ -42,6 +44,7 @@ import { VisitPlaceTagsRepository } from "./repositories/visit-place-tags.reposi
     CitiesRepository,
     NotificationsRepository,
     PlaceCurationRepository,
+    PlansRepository,
     PlacesRepository,
     SocialRepository,
     VisitPlaceTagsRepository,
