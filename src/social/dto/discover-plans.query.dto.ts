@@ -1,6 +1,7 @@
 import { Type } from "class-transformer";
 import {
   IsDateString,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -10,6 +11,10 @@ import {
 } from "class-validator";
 
 export class DiscoverPlansQueryDto {
+  @IsOptional()
+  @IsIn(["now", "today", "week"])
+  window?: "now" | "today" | "week";
+
   @IsOptional()
   @IsString()
   @MaxLength(120)

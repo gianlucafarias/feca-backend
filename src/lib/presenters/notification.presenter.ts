@@ -85,22 +85,22 @@ export function buildNotificationPresentation(
     case "group_join_request": {
       const groupId = readNotificationString(data, "groupId") ?? entity?.id ?? null;
       const groupName = readNotificationString(data, "groupName") ?? "tu plan";
-      return { body: `${actorName} quiere sumarse a ${groupName}`, deepLink: groupId ? `/plan/${groupId}` : null, title: "Nueva solicitud para tu plan" };
+      return { body: `${actorName} quiere sumarse a ${groupName}`, deepLink: groupId ? `/group/${groupId}` : null, title: "Nueva solicitud para tu plan" };
     }
     case "group_join_approved": {
       const groupId = readNotificationString(data, "groupId") ?? entity?.id ?? null;
       const groupName = readNotificationString(data, "groupName") ?? "un plan";
-      return { body: `Ya podés participar en ${groupName}`, deepLink: groupId ? `/plan/${groupId}` : null, title: "Solicitud aprobada" };
+      return { body: `Ya podés participar en ${groupName}`, deepLink: groupId ? `/group/${groupId}` : null, title: "Solicitud aprobada" };
     }
     case "group_join_rejected": {
       const groupId = readNotificationString(data, "groupId") ?? entity?.id ?? null;
       const groupName = readNotificationString(data, "groupName") ?? "ese plan";
-      return { body: `Tu solicitud para ${groupName} no fue aprobada`, deepLink: groupId ? `/plan/${groupId}` : null, title: "Solicitud rechazada" };
+      return { body: `Tu solicitud para ${groupName} no fue aprobada`, deepLink: groupId ? `/group/${groupId}` : null, title: "Solicitud rechazada" };
     }
     case "group_message": {
       const groupId = readNotificationString(data, "groupId") ?? entity?.id ?? null;
       const groupName = readNotificationString(data, "groupName") ?? "un plan";
-      return { body: `Hay un mensaje nuevo en ${groupName}`, deepLink: groupId ? `/plan/${groupId}` : null, title: "Mensaje nuevo" };
+      return { body: `Hay un mensaje nuevo en ${groupName}`, deepLink: groupId ? `/group/${groupId}/chat` : null, title: "Mensaje nuevo" };
     }
     case "group_event_proposed": {
       const groupId = readNotificationString(data, "groupId") ?? null;

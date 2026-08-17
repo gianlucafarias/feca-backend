@@ -1,4 +1,7 @@
 import {
+  ArrayMaxSize,
+  ArrayUnique,
+  IsArray,
   IsDateString,
   IsEnum,
   IsOptional,
@@ -6,7 +9,7 @@ import {
   MaxLength,
   MinLength,
 } from "class-validator";
-import { GroupJoinPolicy } from "@prisma/client";
+import { GroupJoinPolicy, GroupVisibility } from "@prisma/client";
 
 export class CreatePlanDto {
   @IsString()
@@ -22,6 +25,17 @@ export class CreatePlanDto {
   @IsOptional()
   @IsEnum(GroupJoinPolicy)
   joinPolicy: GroupJoinPolicy = GroupJoinPolicy.open;
+
+  @IsOptional()
+  @IsEnum(GroupVisibility)
+  visibility: GroupVisibility = GroupVisibility.public;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
+  inviteUserIds?: string[];
 
   @IsDateString()
   date!: string;

@@ -47,12 +47,17 @@ export class PlansService {
   async discover(userId: string, query: DiscoverPlansQueryDto) {
     this.assertBounds(query);
     const now = new Date();
+    const viewerCityId =
+      !query.city && !query.cityGooglePlaceId
+        ? await this.socialRepository.getUserCityId(userId)
+        : undefined;
     const requestedFrom = query.fromDate || query.from
       ? new Date(query.fromDate || query.from!)
       : now;
     const fromDate = requestedFrom > now ? requestedFrom : now;
     const rows = await this.plansRepository.listDiscoverablePlans({
       city: query.city,
+      cityId: viewerCityId ?? undefined,
       cityGooglePlaceId: query.cityGooglePlaceId,
       fromDate,
       maxLat: query.maxLat,
@@ -121,15 +126,32 @@ export class PlansService {
 
   async create(userId: string, body: CreatePlanDto) {
     const place = await this.resolvePlace(body);
-    const plan = await this.plansRepository.createPlan({
+    const created = await this.plansRepository.createPlan({
       createdById: userId,
       date: body.date,
       description: body.description,
       inviteCode: generateInviteCode(),
+      inviteUserIds: body.inviteUserIds,
       joinPolicy: body.joinPolicy,
       name: body.name.trim(),
       placeId: place.id,
+      visibility: body.visibility,
     });
+    const plan = created.plan;
+
+    if (created.invitedUserIds.length > 0) {
+      await this.notificationsService.publish({
+        actorId: userId,
+        entity: { id: plan.id, type: "group" },
+        payload: {
+          groupId: plan.id,
+          groupName: plan.name,
+          inviteCode: plan.inviteCode,
+        },
+        recipientIds: created.invitedUserIds,
+        type: "group_invite",
+      });
+    }
 
     return {
       plan: serializePlan(
@@ -256,7 +278,9 @@ export class PlansService {
       requests: requests.map((request) => ({
         createdAt: request.createdAt.toISOString(),
         id: request.id,
+        planId: groupId,
         participationState: "requested" as const,
+        status: "pending" as const,
         user: serializeUserPublic(request.user),
       })),
     };
@@ -318,6 +342,7 @@ export class PlansService {
       groupId,
       query.limit ?? 20,
       query.cursor ? decodeMessageCursor(query.cursor) : undefined,
+      query.since ? new Date(query.since) : undefined,
     );
     const last = page.messages[page.messages.length - 1];
     return {
@@ -446,14 +471,18 @@ function serializePlan(
   const event = selectedEvent ?? null;
 
   return {
+    createdBy: serializeUserPublic(plan.createdBy),
     description: plan.description,
     friendParticipant: friend ? serializeUserPublic(friend.user) : null,
     id: plan.id,
+    isAdmin:
+      membership?.role === GroupMemberRole.owner ||
+      membership?.role === GroupMemberRole.admin,
+    isOwner: plan.createdById === viewerId || membership?.role === GroupMemberRole.owner,
     joinPolicy: plan.joinPolicy,
     memberCount: acceptedMembers.length,
-    memberPreview: approved
-      ? acceptedMembers.slice(0, 3).map((member) => serializeUserPublic(member.user))
-      : [],
+    memberPreview: (approved ? acceptedMembers : acceptedMembers.slice(0, 3))
+      .map((member) => serializeUserPublic(member.user)),
     name: plan.name,
     nextEvent: event ? serializeNextEvent(event, approved) : null,
     participationState: mapParticipationState(membership?.status),
@@ -472,7 +501,7 @@ function serializeNextEvent(
   const areaLabel = event.place.city?.trim() || null;
 
   return {
-    date: event.date.toISOString().slice(0, 10),
+    date: event.date.toISOString(),
     id: event.id,
     place: {
       address: approved ? event.place.address : areaLabel,
@@ -493,6 +522,7 @@ function serializeMessage(message: PlanMessageWithAuthor) {
     body: message.body,
     createdAt: message.createdAt.toISOString(),
     id: message.id,
+    planId: message.groupId,
   };
 }
 

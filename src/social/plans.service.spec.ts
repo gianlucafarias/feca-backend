@@ -89,7 +89,10 @@ function service(overrides: Record<string, unknown> = {}) {
       listMessages: vi.fn(),
       updatePlan: vi.fn(),
     },
-    socialRepository: { listFollowedUserIds: vi.fn().mockResolvedValue([]) },
+    socialRepository: {
+      getUserCityId: vi.fn().mockResolvedValue(null),
+      listFollowedUserIds: vi.fn().mockResolvedValue([]),
+    },
     ...overrides,
   };
   return {
@@ -134,12 +137,14 @@ describe("PlansService", () => {
 
     expect(page.plans).toHaveLength(1);
     expect(page.plans[0]).toMatchObject({
+      createdBy: { id: "owner-a" },
       id: "a",
+      isOwner: false,
       joinPolicy: "open",
       memberCount: 1,
-      memberPreview: [],
+      memberPreview: [{ id: "owner-a" }],
       nextEvent: {
-        date: "2099-01-01",
+        date: "2099-01-01T10:00:00.000Z",
         place: {
           address: "Ceres",
           areaLabel: "Ceres",

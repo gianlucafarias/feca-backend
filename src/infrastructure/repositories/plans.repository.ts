@@ -42,29 +42,54 @@ export type PlanMessageWithAuthor = Prisma.GroupMessageGetPayload<{
 export class PlansRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  createPlan(input: {
+  async createPlan(input: {
     createdById: string;
     description?: string | null;
     date: string;
     inviteCode: string;
+    inviteUserIds?: string[];
     joinPolicy?: GroupJoinPolicy;
     name: string;
     placeId: string;
+    visibility?: GroupVisibility;
   }) {
-    return this.prisma.group.create({
+    const invitees = await this.prisma.user.findMany({
+      where: {
+        id: {
+          in: Array.from(
+            new Set(
+              (input.inviteUserIds ?? []).filter(
+                (userId) => userId !== input.createdById,
+              ),
+            ),
+          ),
+        },
+      },
+      select: { id: true },
+    });
+
+    const plan = await this.prisma.group.create({
       data: {
         createdById: input.createdById,
         description: input.description ?? null,
         inviteCode: input.inviteCode,
         joinPolicy: input.joinPolicy ?? GroupJoinPolicy.open,
         name: input.name,
-        visibility: GroupVisibility.public,
+        visibility: input.visibility ?? GroupVisibility.public,
         members: {
-          create: {
-            role: GroupMemberRole.owner,
-            status: GroupMemberStatus.accepted,
-            userId: input.createdById,
-          },
+          create: [
+            {
+              role: GroupMemberRole.owner,
+              status: GroupMemberStatus.accepted,
+              userId: input.createdById,
+            },
+            ...invitees.map(({ id }) => ({
+              invitedById: input.createdById,
+              role: GroupMemberRole.member,
+              status: GroupMemberStatus.pending,
+              userId: id,
+            })),
+          ],
         },
         events: {
           create: {
@@ -77,6 +102,11 @@ export class PlansRepository {
       },
       include: planInclude,
     });
+
+    return {
+      invitedUserIds: invitees.map(({ id }) => id),
+      plan,
+    };
   }
 
   findPlanById(groupId: string) {
@@ -89,6 +119,7 @@ export class PlansRepository {
   async listDiscoverablePlans(input: {
     now: Date;
     city?: string;
+    cityId?: string;
     minLat?: number;
     maxLat?: number;
     minLng?: number;
@@ -104,6 +135,7 @@ export class PlansRepository {
       },
       status: { notIn: [GroupEventStatus.cancelled, GroupEventStatus.completed] },
       place: {
+        ...(input.cityId ? { cityId: input.cityId } : {}),
         ...(input.city
           ? { city: { contains: input.city.trim(), mode: "insensitive" } }
           : {}),
@@ -312,11 +344,17 @@ export class PlansRepository {
     });
   }
 
-  async listMessages(groupId: string, limit: number, cursor?: { createdAt: Date; id: string }) {
+  async listMessages(
+    groupId: string,
+    limit: number,
+    cursor?: { createdAt: Date; id: string },
+    since?: Date,
+  ) {
     const rows = await this.prisma.groupMessage.findMany({
       where: {
         groupId,
         deletedAt: null,
+        ...(since ? { createdAt: { gt: since } } : {}),
         ...(cursor
           ? {
               OR: [

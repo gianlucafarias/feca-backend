@@ -19,8 +19,8 @@ export class UpdatePlanDto {
   description?: string | null;
 
   @IsOptional()
-  @IsIn(["open", "request_approval"])
-  joinPolicy?: "open" | "request_approval";
+  @IsIn(["open", "request_approval", "invite_only"])
+  joinPolicy?: "open" | "request_approval" | "invite_only";
 
   @IsOptional()
   @IsDateString()

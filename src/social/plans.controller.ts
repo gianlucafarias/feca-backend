@@ -9,6 +9,7 @@ import {
   Query,
   UseGuards,
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { AccessTokenGuard } from "../common/guards/access-token.guard";
@@ -108,6 +109,7 @@ export class PlansController {
   }
 
   @Post(":id/messages")
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   sendMessage(
     @CurrentUser() user: AccessTokenPayload,
     @Param("id") groupId: string,
