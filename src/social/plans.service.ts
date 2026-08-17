@@ -484,7 +484,7 @@ function serializePlan(
     memberPreview: (approved ? acceptedMembers : acceptedMembers.slice(0, 3))
       .map((member) => serializeUserPublic(member.user)),
     name: plan.name,
-    nextEvent: event ? serializeNextEvent(event, approved) : null,
+    nextEvent: event ? serializeNextEvent(event, approved, viewerId) : null,
     participationState: mapParticipationState(membership?.status),
     visibility: plan.visibility,
   };
@@ -493,6 +493,7 @@ function serializePlan(
 function serializeNextEvent(
   event: PlanWithRelations["events"][number],
   approved: boolean,
+  viewerId: string,
 ) {
   const exactLat = event.place.lat;
   const exactLng = event.place.lng;
@@ -501,8 +502,18 @@ function serializeNextEvent(
   const areaLabel = event.place.city?.trim() || null;
 
   return {
+    allowsRsvp:
+      approved &&
+      (event.status === GroupEventStatus.proposed ||
+        event.status === GroupEventStatus.confirmed),
     date: event.date.toISOString(),
     id: event.id,
+    ...(approved
+      ? {
+          myRsvp:
+            event.rsvps?.find((rsvp) => rsvp.userId === viewerId)?.rsvp ?? "none",
+        }
+      : {}),
     place: {
       address: approved ? event.place.address : areaLabel,
       areaLabel,
